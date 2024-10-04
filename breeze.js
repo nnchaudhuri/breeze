@@ -155,9 +155,9 @@ class Space {
             }
         
         //calc req'd air flow
-        this.airChng = airChng; //req'd air changes (per hr) = ACH
+        this.airChng = airChng; //req'd air changes (per hr = ACH)
         this.V = cells.reduce((sum, cell) => sum+cell.V, 0); //space volume
-        this.airFlow = this.V*airChng/60; //req'd air flow to space (ft^3/min) = CFM
+        this.airFlow = this.V*airChng/60; //req'd air flow to space (ft^3/min = CFM)
     }
 }
 
@@ -170,7 +170,7 @@ class Zone {
             for (let i = 0; i < spaces.length; i++) {
                 spaces[i].zone = this;
             }
-        this.tgtVel = tgtVel; //target airflow velocity
+        this.tgtVel = tgtVel; //max target airflow velocity (ft/min = FPM)
     }
 }
 
