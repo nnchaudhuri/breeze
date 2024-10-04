@@ -29,10 +29,10 @@ class Element {
     //set up visuals
     setupVisuals() {
         //initialize mesh material
-        this.mat = new BABYLON.StandardMaterial("mat", scene);
-        this.col = new BABYLON.Color3(1, 1, 1);
-        this.mat.diffuseColor = this.col;
-        this.mesh.material = this.mat;
+        const mat = new BABYLON.StandardMaterial("mat", this.scene);
+        const col = new BABYLON.Color3(1, 1, 1);
+        mat.diffuseColor = col;
+        this.mesh.material = mat;
     }
 }
 
@@ -69,15 +69,8 @@ class RndDuct extends Duct {
         this.V = this.A*this.L; //duct volume
         this.SA = this.P*this.L; //duct surface area
 
-        //create duct section shape
-        this.shape = [];
-        const numArcPts = 32;
-        for (let i = 0; i < numArcPts; i++) {
-            this.shape.push(new BABYLON.Vector3(rad*Math.cos(i*2*Math.PI/numArcPts), rad*Math.sin(i*2*Math.PI/numArcPts), 0));
-        }
-
         //create duct mesh
-        this.mesh = BABYLON.MeshBuilder.ExtrudeShape("rndDuct", {shape:this.shape, path:this.path, sideOrientation:BABYLON.Mesh.DOUBLESIDE}, scene);
+        this.mesh = BABYLON.MeshBuilder.CreateTube("rndDuct", {path:this.path, radius:rad, sideOrientation:BABYLON.Mesh.DOUBLESIDE}, this.scene);
 
         //setup
         this.setupVisuals();
@@ -99,15 +92,16 @@ class RectDuct extends Duct {
         this.SA = this.P*this.L; //duct surface area
 
         //create duct section shape
-        this.shape = [
+        const shape = [
             new BABYLON.Vector3(w/2, h/2, 0),
             new BABYLON.Vector3(-w/2, h/2, 0),
             new BABYLON.Vector3(-w/2, -h/2, 0),
             new BABYLON.Vector3(w/2, -h/2, 0)
         ];
+        shape.push(shape[0]);
 
         //create duct mesh
-        this.mesh = BABYLON.MeshBuilder.ExtrudeShape("rectDuct", {shape:this.shape, path:this.path, sideOrientation:BABYLON.Mesh.DOUBLESIDE}, scene);
+        this.mesh = BABYLON.MeshBuilder.ExtrudeShape("rectDuct", {shape:shape, path:this.path, sideOrientation:BABYLON.Mesh.DOUBLESIDE}, this.scene);
 
         //setup
         this.setupVisuals();
@@ -116,50 +110,52 @@ class RectDuct extends Duct {
 
 //define cell class (fundamental area unit)
 class Cell extends Element {
-    constructor(scene, space, dx, dy, h, x, y) {
+    constructor(scene, dx, dy, elevB, elevT, x, y) {
         super(scene);
 
         //initialize properties
-        this.space = space; //space the cell is within
+        this.space = null; //space the cell is within
         this.dx = dx; //x length of cell (ft)
         this.dy = dy; //y length of cell (ft)
-        this.h = h; //height of cell (ft)
+        this.elevB = elevB; //elevation at cell bottom (ft)
+        this.elevT = elevT; //elevation at cell top (ft)
+        this.h = elevT-elevB; //height of cell (ft)
         this.A = dx*dy; //area of cell (ft^2)
-        this.V = this.A*h; //volume of cell (ft^3)
+        this.V = this.A*this.h; //volume of cell (ft^3)
         this.x = x; //x coordinate (ft)
-        this.y = y; // y coordinate (ft)
+        this.y = y; //y coordinate (ft)
 
         //create cell area shape
-        this.shape = [
-            new BABYLON.Vector3(dx/2, dy/2, 0),
-            new BABYLON.Vector3(-dx/2, dy/2, 0),
-            new BABYLON.Vector3(-dx/2, -dy/2, 0),
-            new BABYLON.Vector3(dx/2, -dy/2, 0)
-        ];
-
-        //create cell path (height)
-        const path = [
-            new BABYLON.Vector3(x, 0, y),
-            new BABYLON.Vector3(x, h, y)
+        const shape = [
+            new BABYLON.Vector3(x+dx/2, 0, y+dy/2),
+            new BABYLON.Vector3(x-dx/2, 0, y+dy/2),
+            new BABYLON.Vector3(x-dx/2, 0, y-dy/2),
+            new BABYLON.Vector3(x+dx/2, 0, y-dy/2)
         ];
 
         //create cell mesh
-        this.mesh = BABYLON.MeshBuilder.ExtrudeShape("cell", {shape:this.shape, path:path, sideOrientation:BABYLON.Mesh.DOUBLESIDE}, scene);
+        this.mesh = BABYLON.MeshBuilder.ExtrudePolygon("cell", {shape:shape, depth:this.h, sideOrientation:BABYLON.Mesh.DOUBLESIDE}, this.scene);
+        this.mesh.translate(new BABYLON.Vector3(0, elevT, 0), 1, BABYLON.Space.WORLD);
 
         //setup
         this.setupVisuals();
+        this.mesh.material.alpha = 0.25; //make transparent
     }
 }
 
 //define space class (collection of adjacent cells)
 class Space {
-    constructor(cluster, cells, airChng) {
+    constructor(cells, airChng) {
         //initialize properties
-        this.cluster = cluster; //cluster the cell is within
-        this.cells = cells; //array of cells in the cluster
-        this.airChng = airChng; //req'd air changes (per hr) = ACH
+        this.zone = null; //zone the space is within
+        this.cells = cells; //array of cells in the space
+            //set cell spaces to this space
+            for (let i = 0; i < cells.length; i++) {
+                cells[i].space = this;
+            }
         
         //calc req'd air flow
+        this.airChng = airChng; //req'd air changes (per hr) = ACH
         this.V = cells.reduce((sum, cell) => sum+cell.V, 0); //space volume
         this.airFlow = this.V*airChng/60; //req'd air flow to space (ft^3/min) = CFM
     }
@@ -170,6 +166,10 @@ class Zone {
     constructor(spaces, tgtVel) {
         //initialize properties
         this.spaces = spaces; //array of spaces in the zone
+            //set space zones to this zone
+            for (let i = 0; i < spaces.length; i++) {
+                spaces[i].zone = this;
+            }
         this.tgtVel = tgtVel; //target airflow velocity
     }
 }
@@ -227,6 +227,16 @@ const createScene = async function () {
     scene.registerBeforeRender(function () {
         light.direction = camera.position;
     })
+
+    //test code
+    ///*
+    const cell0 = new Cell(scene, 4, 6, 0, 16, 5, 10);
+    const cell1 = new Cell(scene, 4, 6, 2, 20, 9, 16);
+    const space = new Space([cell0, cell1], 6);
+    const zone = new Zone([space], 800);
+    const rndDuct = new RndDuct(scene, cell0, cell1, 18, 22, 2);
+    const rectDuct = new RectDuct(scene, cell0, cell1, 25, 26, 2, 1);
+    //*/
 
     //render updates
     scene.registerBeforeRender(function() {
