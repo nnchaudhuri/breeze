@@ -27,12 +27,12 @@ class Element {
     }
 
     //set up visuals
-    setupVisuals() {
+    setupVisuals([r, g, b], alpha) {
         //initialize mesh material
         const mat = new BABYLON.StandardMaterial("mat", this.scene);
-        const col = new BABYLON.Color3(1, 1, 1);
-        mat.diffuseColor = col;
+        mat.diffuseColor = new BABYLON.Color3(r, g, b);
         this.mesh.material = mat;
+        this.mesh.material.alpha = alpha;
     }
 }
 
@@ -73,7 +73,7 @@ class RndDuct extends Duct {
         this.mesh = BABYLON.MeshBuilder.CreateTube("rndDuct", {path:this.path, radius:rad, sideOrientation:BABYLON.Mesh.DOUBLESIDE}, this.scene);
 
         //setup
-        this.setupVisuals();
+        this.setupVisuals([1, 1, 1], 1);
     }
 }
 
@@ -104,17 +104,18 @@ class RectDuct extends Duct {
         this.mesh = BABYLON.MeshBuilder.ExtrudeShape("rectDuct", {shape:shape, path:this.path, sideOrientation:BABYLON.Mesh.DOUBLESIDE}, this.scene);
 
         //setup
-        this.setupVisuals();
+        this.setupVisuals([1, 1, 1], 1);
     }
 }
 
 //define cell class (fundamental area unit)
 class Cell extends Element {
-    constructor(scene, dx, dy, elevB, elevT, x, y) {
+    constructor(scene, ID, dx, dy, elevB, elevT, x, y) {
         super(scene);
 
         //initialize properties
         this.space = null; //space the cell is within
+        this.ID = ID; //cell ID # (as graph vertex)
         this.dx = dx; //x length of cell (ft)
         this.dy = dy; //y length of cell (ft)
         this.elevB = elevB; //elevation at cell bottom (ft)
@@ -138,14 +139,28 @@ class Cell extends Element {
         this.mesh.translate(new BABYLON.Vector3(0, elevT, 0), 1, BABYLON.Space.WORLD);
 
         //setup
-        this.setupVisuals();
-        this.mesh.material.alpha = 0.25; //make transparent
+        this.setupVisuals([1, 1, 1], 0.01);
+        this.genLabel();
+    }
+
+    //generate text label per cell ID
+    async genLabel() {
+        const font = await (await fetch("https://assets.babylonjs.com/fonts/Kenney Future Regular.json")).json();
+        const text = BABYLON.MeshBuilder.CreateText("ID", this.ID.toString(), font, {size:1, resolution:8, depth:0.1});
+        text.translate(new BABYLON.Vector3(this.x, this.elevT, this.y), 1, BABYLON.Space.WORLD);
+        text.rotate(new BABYLON.Vector3(1, 0, 0), Math.PI/2, BABYLON.Space.WORLD);
+        text.translate(new BABYLON.Vector3(0, 0, -0.5), 1, BABYLON.Space.WORLD);
+        const textMat = new BABYLON.StandardMaterial("textMat", this.scene);
+        textMat.diffuseColor = new BABYLON.Color3(0, 0, 0);
+        text.material = textMat;
     }
 }
 
 //define space class (collection of adjacent cells)
-class Space {
-    constructor(cells, airChng) {
+class Space extends Element {
+    constructor(scene, cells, airChng) {
+        super(scene);
+
         //initialize properties
         this.zone = null; //zone the space is within
         this.cells = cells; //array of cells in the space
@@ -158,6 +173,12 @@ class Space {
         this.airChng = airChng; //req'd air changes (per hr = ACH)
         this.V = cells.reduce((sum, cell) => sum+cell.V, 0); //space volume
         this.airFlow = this.V*airChng/60; //req'd air flow to space (ft^3/min = CFM)
+
+        //create space mesh
+        this.mesh = BABYLON.Mesh.MergeMeshes(cells.map((cell) => cell.mesh), false, true, undefined, false, false);
+
+        //setup
+        this.setupVisuals([1, 1, 1], 0.75);
     }
 }
 
@@ -230,12 +251,45 @@ const createScene = async function () {
 
     //test code
     ///*
-    const cell0 = new Cell(scene, 4, 6, 0, 16, 5, 10);
-    const cell1 = new Cell(scene, 4, 6, 2, 20, 9, 16);
-    const space = new Space([cell0, cell1], 6);
-    const zone = new Zone([space], 800);
-    const rndDuct = new RndDuct(scene, cell0, cell1, 18, 22, 2);
-    const rectDuct = new RectDuct(scene, cell0, cell1, 25, 26, 2, 1);
+        let ID = 0;
+        const d = 5;
+        let spaces = [];
+
+        let cells = [];
+        for (let i = 0; i < 3; i++) {
+            for (let j = 0; j < 3; j++) {
+                cells.push(new Cell(scene, ID, d, d, 0, 15, d*i, d*j));
+                ID++;
+            }
+        }
+        spaces.push(new Space(scene, cells, 6));
+
+        cells = [];
+        for (let i = 0; i < 5; i++) {
+            for (let j = 0; j < 5; j++) {
+                cells.push(new Cell(scene, ID, d, d, 0, 15, 15+d*i, d*j));
+                ID++;
+            }
+        }
+        spaces.push(new Space(scene, cells, 6));
+
+        cells = [];
+        for (let i = 0; i < 3; i++) {
+            for (let j = 0; j < 6; j++) {
+                cells.push(new Cell(scene, ID, d, d, 0, 15, d*i, 15+d*j));
+                ID++;
+            }
+        }
+        spaces.push(new Space(scene, cells, 6));
+
+        cells = [];
+        for (let i = 0; i < 5; i++) {
+            for (let j = 0; j < 5; j++) {
+                cells.push(new Cell(scene, ID, d, d, 0, 15, 15+d*i, 25+d*j));
+                ID++;
+            }
+        }
+        spaces.push(new Space(scene, cells, 6));
     //*/
 
     //render updates
@@ -246,4 +300,142 @@ const createScene = async function () {
 	return scene;
 }
 
+/* PRIM'S ALGORITHM pseudo code
+class MinHeap {
+    constructor() {
+        this.heap = [];
+    }
 
+    // Insert a new node into the heap
+    insert(node) {
+        this.heap.push(node); // Add the new node to the end
+        this.bubbleUp(this.heap.length - 1); // Restore heap property
+    }
+
+    // Extract the node with the minimum value (root of the heap)
+    extractMin() {
+        if (this.heap.length === 0) return null;
+        if (this.heap.length === 1) return this.heap.pop();
+
+        const min = this.heap[0]; // The root (smallest element)
+        const end = this.heap.pop(); // Remove the last element
+        this.heap[0] = end; // Replace the root with the last element
+        this.sinkDown(0); // Restore heap property
+
+        return min;
+    }
+
+    // Restore the heap property by bubbling up the newly added node
+    bubbleUp(index) {
+        let current = index;
+        const element = this.heap[current];
+
+        while (current > 0) {
+            const parentIndex = Math.floor((current - 1) / 2); // Parent's index
+            const parent = this.heap[parentIndex];
+
+            if (element[1] >= parent[1]) break; // If the element is larger than or equal to the parent, stop
+
+            this.heap[current] = parent; // Swap the element with its parent
+            current = parentIndex;
+        }
+        this.heap[current] = element; // Place the element in the correct position
+    }
+
+    // Restore the heap property by sinking down the root node
+    sinkDown(index) {
+        let current = index;
+        const length = this.heap.length;
+        const element = this.heap[current];
+
+        while (true) {
+            const leftChildIndex = 2 * current + 1; // Left child index
+            const rightChildIndex = 2 * current + 2; // Right child index
+            let swap = null;
+
+            if (leftChildIndex < length) {
+                const leftChild = this.heap[leftChildIndex];
+                if (leftChild[1] < element[1]) {
+                    swap = leftChildIndex;
+                }
+            }
+
+            if (rightChildIndex < length) {
+                const rightChild = this.heap[rightChildIndex];
+                if ((swap === null && rightChild[1] < element[1]) || (swap !== null && rightChild[1] < this.heap[swap][1])) {
+                    swap = rightChildIndex;
+                }
+            }
+
+            if (swap === null) break;
+
+            this.heap[current] = this.heap[swap];
+            current = swap;
+        }
+
+        this.heap[current] = element; // Place the element in the correct position
+    }
+
+    // Check if the heap is empty
+    isEmpty() {
+        return this.heap.length === 0;
+    }
+}
+
+function primForSubset(graph, subset) {
+    const numVertices = graph.length;
+    const mst = [];
+    const visited = new Array(numVertices).fill(false);
+    const inSubset = new Array(numVertices).fill(false);
+    const minHeap = new MinHeap();
+    
+    // Mark subset vertices
+    for (const v of subset) {
+        inSubset[v] = true;
+    }
+
+    let includedInSubset = 0;
+    const subsetSize = subset.length;
+
+    // Start from any vertex in the subset (e.g., subset[0])
+    const startVertex = subset[0];
+    minHeap.insert([startVertex, 0]); // (vertex, weight)
+
+    while (!minHeap.isEmpty() && includedInSubset < subsetSize) {
+        const [vertex, weight] = minHeap.extractMin();
+
+        if (visited[vertex]) continue;
+        visited[vertex] = true;
+
+        if (inSubset[vertex]) {
+            includedInSubset++;
+        }
+        
+        mst.push([vertex, weight]);
+
+        // Add all edges of the current vertex to the priority queue
+        for (const [neighbor, edgeWeight] of graph[vertex]) {
+            if (!visited[neighbor]) {
+                minHeap.insert([neighbor, edgeWeight]);
+            }
+        }
+    }
+
+    // Return the MST that includes all vertices in the subset
+    return mst;
+}
+
+// Example usage:
+const graph = [
+    [[1, 2], [3, 6]], // Vertex 0: connected to vertex 1 (weight 2) and vertex 3 (weight 6)
+    [[0, 2], [2, 3], [3, 8], [4, 5]], // Vertex 1: connected to 0, 2, 3, 4
+    [[1, 3], [4, 7]], // Vertex 2: connected to 1 and 4
+    [[0, 6], [1, 8], [4, 9]], // Vertex 3: connected to 0, 1, and 4
+    [[1, 5], [2, 7], [3, 9]]  // Vertex 4: connected to 1, 2, and 3
+];
+
+const subset = [1, 2, 4];  // We only care about vertices 1, 2, and 4
+
+const mst = primForSubset(graph, subset);
+console.log("Minimum Spanning Tree for Subset:", mst);
+*/
