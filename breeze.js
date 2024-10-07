@@ -190,7 +190,8 @@ class Zone {
     constructor(scene, tgtVel) {
         //initialize properties
         this.scene = scene; //scene hosting zone
-        this.spaces = null; //array of spaces in the zone (initialize null, then use set func)
+        this.spaces = []; //array of spaces in the zone (initialize empty, then use set or translate func)
+        this.grid = []; //2D array (grid) of cells in the zone (initialize empty, then use translate func)
         this.tgtVel = tgtVel; //max target airflow velocity (ft/min = FPM)
     }
 
@@ -202,7 +203,7 @@ class Zone {
         }
     }
 
-    //translate text grid to zone spaces
+    //translate text to zone spaces & grid
     /*
         format:
                 '#' represents a cell in the grid, where the # value is the space (ID) the cell is in
@@ -221,17 +222,19 @@ class Zone {
         let spaceCells = new Map();
         let cellID = 0;
         let x = 0;
-        let y = dy*(rows.length-1);
+        let y = 0;
 
         //loop through rows
-        for (let i = 0; i < rows.length; i++) {
+        for (let i = rows.length-1; i >= 0; i--) {
             const row = rows[i].split(' ');
+            let gridRow = [];
 
             //create cell for each item in row
             for (let j = 0; j < row.length; j++) {
                 const spaceID = parseFloat(row[j]);
                 if (!isNaN(spaceID)) { //ignore points without cells
                     const cell = new Cell(this.scene, cellID, dx, dy, elevB, elevT, x, y);
+                    gridRow.push(cell); //update grid
 
                     if (!spaceCells.has(spaceID)) { //create new space ID if doesn't exist yet
                         spaceCells.set(spaceID, [cell]);
@@ -239,11 +242,15 @@ class Zone {
                         spaceCells.get(spaceID).push(cell);
                     }
                     cellID++;
+                } else {
+                    gridRow.push(null);
                 }
                 x += dx;
             }
+
+            this.grid.push(gridRow); //update grid
             x = 0;
-            y -= dy;
+            y += dy;
         }
 
         //create spaces
@@ -531,7 +538,9 @@ const createScene = async function () {
     //test code
     ///*
         const zone = new Zone(scene, 800);
-        zone.load().then(() => {zone.color()});
+        zone.load().then(() => {
+            zone.color();
+        });
     //*/
 
     //render updates
