@@ -147,9 +147,11 @@ class Cell extends Element {
     async genLabel() {
         const font = await (await fetch("https://assets.babylonjs.com/fonts/Kenney Future Regular.json")).json();
         const text = BABYLON.MeshBuilder.CreateText("ID", this.ID.toString(), font, {size:1, resolution:8, depth:0.1});
+
         text.translate(new BABYLON.Vector3(this.x, this.elevT, this.y), 1, BABYLON.Space.WORLD);
         text.rotate(new BABYLON.Vector3(1, 0, 0), Math.PI/2, BABYLON.Space.WORLD);
         text.translate(new BABYLON.Vector3(0, 0, -0.5), 1, BABYLON.Space.WORLD);
+
         const textMat = new BABYLON.StandardMaterial("textMat", this.scene);
         textMat.diffuseColor = new BABYLON.Color3(0, 0, 0);
         text.material = textMat;
@@ -194,6 +196,135 @@ class Zone {
         this.tgtVel = tgtVel; //max target airflow velocity (ft/min = FPM)
     }
 }
+
+//define minheap class (priority queue returning lowest value node)
+class MinHeap {
+    constructor() {
+        this.heap = [];
+    }
+
+    //add node to the heap
+    insert(node) {
+        this.heap.push(node);
+        this.bubbleUp(this.heap.length-1);
+    }
+
+    //retrieve lowest value node from the heap
+    extractMin() {
+        if (this.heap.length === 0) return null;
+        if (this.heap.length === 1) return this.heap.pop();
+
+        const min = this.heap[0];
+        const end = this.heap.pop();
+        this.heap[0] = end;
+        this.sinkDown(0);
+
+        return min;
+    }
+
+    //move node up in heap
+    bubbleUp(index) {
+        let current = index;
+        const element = this.heap[current];
+
+        while (current > 0) {
+            const parentIndex = Math.floor((current-1)/2);
+            const parent = this.heap[parentIndex];
+
+            if (element[1] >= parent[1]) break;
+
+            this.heap[current] = parent;
+            current = parentIndex;
+        }
+
+        this.heap[current] = element;
+    }
+
+    //move node down in heap
+    sinkDown(index) {
+        let current = index;
+        const length = this.heap.length;
+        const element = this.heap[current];
+
+        while (true) {
+            const leftChildIndex = 2*current+1;
+            const rightChildIndex = 2*current+2;
+            let swap = null;
+
+            if (leftChildIndex < length) {
+                const leftChild = this.heap[leftChildIndex];
+                if (leftChild[1] < element[1]) {
+                    swap = leftChildIndex;
+                }
+            }
+
+            if (rightChildIndex < length) {
+                const rightChild = this.heap[rightChildIndex];
+                if ((swap === null && rightChild[1] < element[1]) || (swap !== null && rightChild[1] < this.heap[swap][1])) {
+                    swap = rightChildIndex;
+                }
+            }
+
+            if (swap === null) break;
+
+            this.heap[current] = this.heap[swap];
+            current = swap;
+        }
+
+        this.heap[current] = element;
+    }
+
+    //returns if heap is empty
+    isEmpty() {
+        return this.heap.length === 0;
+    }
+}
+
+//implements Prim's algorithm with finite, defined Steiner (tree) points to find the minimum spanning tree (mst)
+function primSteiner(graph, start, terminals, steinerPts) {
+    //initialize
+    const numVert = graph.length;
+    const mst = [];
+    const visited = new Array(numVert).fill(false);
+    const minHeap = new MinHeap();
+
+    //convert terminals & steiner points to sets
+    const terminalSet = new Set(terminals);
+    let terminalCount = 0;
+    const terminalSize = terminals.length;
+
+    //grow tree from start until all terminals connected
+    minHeap.insert([start, 0]);
+    while (!minHeap.isEmpty() && terminalCount < terminalSize) {
+        const [vertex, weight] = minHeap.extractMin();
+
+        if (visited[vertex]) continue;
+        visited[vertex] = true;
+
+        if (terminalSet.has(vertex)) terminalCount++;
+
+        mst.push([vertex, weight]);
+
+        //add neighbors to heap
+        for (const [neighbor, edgeWeight] of graph[vertex]) {
+            if (!visited[neighbor]) {
+                minHeap.insert([neighbor, edgeWeight]);
+            }
+        }
+    }
+
+    return mst;
+}
+
+/* Example graph
+const graph = [
+    [[1, 2], [2, 3], [4, 5]], // Vertex 0: connected to vertex 1 (weight 2), vertex 2 (weight 3), vertex 4 (weight 5)
+    [[0, 2], [3, 4]], // Vertex 1: connected to vertex 0 (weight 2), vertex 3 (weight 4)
+    [[0, 3], [4, 6]], // Vertex 2: connected to vertex 0 (weight 3), vertex 4 (weight 6)
+    [[1, 4], [4, 7]], // Vertex 3: connected to vertex 1 (weight 4), vertex 4 (weight 7)
+    [[0, 5], [2, 6], [3, 7]]  // Vertex 4: connected to vertex 0 (weight 5), vertex 2 (weight 6), vertex 3 (weight 7)
+];
+*/
 
 //create scene
 const createScene = async function () {
@@ -300,142 +431,3 @@ const createScene = async function () {
 	return scene;
 }
 
-/* PRIM'S ALGORITHM pseudo code
-class MinHeap {
-    constructor() {
-        this.heap = [];
-    }
-
-    // Insert a new node into the heap
-    insert(node) {
-        this.heap.push(node); // Add the new node to the end
-        this.bubbleUp(this.heap.length - 1); // Restore heap property
-    }
-
-    // Extract the node with the minimum value (root of the heap)
-    extractMin() {
-        if (this.heap.length === 0) return null;
-        if (this.heap.length === 1) return this.heap.pop();
-
-        const min = this.heap[0]; // The root (smallest element)
-        const end = this.heap.pop(); // Remove the last element
-        this.heap[0] = end; // Replace the root with the last element
-        this.sinkDown(0); // Restore heap property
-
-        return min;
-    }
-
-    // Restore the heap property by bubbling up the newly added node
-    bubbleUp(index) {
-        let current = index;
-        const element = this.heap[current];
-
-        while (current > 0) {
-            const parentIndex = Math.floor((current - 1) / 2); // Parent's index
-            const parent = this.heap[parentIndex];
-
-            if (element[1] >= parent[1]) break; // If the element is larger than or equal to the parent, stop
-
-            this.heap[current] = parent; // Swap the element with its parent
-            current = parentIndex;
-        }
-        this.heap[current] = element; // Place the element in the correct position
-    }
-
-    // Restore the heap property by sinking down the root node
-    sinkDown(index) {
-        let current = index;
-        const length = this.heap.length;
-        const element = this.heap[current];
-
-        while (true) {
-            const leftChildIndex = 2 * current + 1; // Left child index
-            const rightChildIndex = 2 * current + 2; // Right child index
-            let swap = null;
-
-            if (leftChildIndex < length) {
-                const leftChild = this.heap[leftChildIndex];
-                if (leftChild[1] < element[1]) {
-                    swap = leftChildIndex;
-                }
-            }
-
-            if (rightChildIndex < length) {
-                const rightChild = this.heap[rightChildIndex];
-                if ((swap === null && rightChild[1] < element[1]) || (swap !== null && rightChild[1] < this.heap[swap][1])) {
-                    swap = rightChildIndex;
-                }
-            }
-
-            if (swap === null) break;
-
-            this.heap[current] = this.heap[swap];
-            current = swap;
-        }
-
-        this.heap[current] = element; // Place the element in the correct position
-    }
-
-    // Check if the heap is empty
-    isEmpty() {
-        return this.heap.length === 0;
-    }
-}
-
-function primForSubset(graph, subset) {
-    const numVertices = graph.length;
-    const mst = [];
-    const visited = new Array(numVertices).fill(false);
-    const inSubset = new Array(numVertices).fill(false);
-    const minHeap = new MinHeap();
-    
-    // Mark subset vertices
-    for (const v of subset) {
-        inSubset[v] = true;
-    }
-
-    let includedInSubset = 0;
-    const subsetSize = subset.length;
-
-    // Start from any vertex in the subset (e.g., subset[0])
-    const startVertex = subset[0];
-    minHeap.insert([startVertex, 0]); // (vertex, weight)
-
-    while (!minHeap.isEmpty() && includedInSubset < subsetSize) {
-        const [vertex, weight] = minHeap.extractMin();
-
-        if (visited[vertex]) continue;
-        visited[vertex] = true;
-
-        if (inSubset[vertex]) {
-            includedInSubset++;
-        }
-        
-        mst.push([vertex, weight]);
-
-        // Add all edges of the current vertex to the priority queue
-        for (const [neighbor, edgeWeight] of graph[vertex]) {
-            if (!visited[neighbor]) {
-                minHeap.insert([neighbor, edgeWeight]);
-            }
-        }
-    }
-
-    // Return the MST that includes all vertices in the subset
-    return mst;
-}
-
-// Example usage:
-const graph = [
-    [[1, 2], [3, 6]], // Vertex 0: connected to vertex 1 (weight 2) and vertex 3 (weight 6)
-    [[0, 2], [2, 3], [3, 8], [4, 5]], // Vertex 1: connected to 0, 2, 3, 4
-    [[1, 3], [4, 7]], // Vertex 2: connected to 1 and 4
-    [[0, 6], [1, 8], [4, 9]], // Vertex 3: connected to 0, 1, and 4
-    [[1, 5], [2, 7], [3, 9]]  // Vertex 4: connected to 1, 2, and 3
-];
-
-const subset = [1, 2, 4];  // We only care about vertices 1, 2, and 4
-
-const mst = primForSubset(graph, subset);
-console.log("Minimum Spanning Tree for Subset:", mst);
-*/
