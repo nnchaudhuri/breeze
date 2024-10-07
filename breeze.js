@@ -115,7 +115,7 @@ class Cell extends Element {
 
         //initialize properties
         this.space = null; //space the cell is within
-        this.ID = ID; //cell ID # (as graph vertex)
+        this.ID = ID; //cell ID # (graph vertex)
         this.dx = dx; //x length of cell (ft)
         this.dy = dy; //y length of cell (ft)
         this.elevB = elevB; //elevation at cell bottom (ft)
@@ -160,11 +160,12 @@ class Cell extends Element {
 
 //define space class (collection of adjacent cells)
 class Space extends Element {
-    constructor(scene, cells, airChng) {
+    constructor(scene, ID, cells, airChng) {
         super(scene);
 
         //initialize properties
         this.zone = null; //zone the space is within
+        this.ID = ID; //space ID #
         this.cells = cells; //array of cells in the space
             //set cell spaces to this space
             for (let i = 0; i < cells.length; i++) {
@@ -186,14 +187,118 @@ class Space extends Element {
 
 //define zone class (collection of adjacent, co-supplied spaces)
 class Zone {
-    constructor(spaces, tgtVel) {
+    constructor(scene, tgtVel) {
         //initialize properties
-        this.spaces = spaces; //array of spaces in the zone
-            //set space zones to this zone
-            for (let i = 0; i < spaces.length; i++) {
-                spaces[i].zone = this;
-            }
+        this.scene = scene; //scene hosting zone
+        this.spaces = null; //array of spaces in the zone (initialize null, then use set func)
         this.tgtVel = tgtVel; //max target airflow velocity (ft/min = FPM)
+    }
+
+    //set zone spaces
+    set(spaces) {
+        this.spaces = spaces;
+        for (let i = 0; i < spaces.length; i++) {
+            spaces[i].zone = this;
+        }
+    }
+
+    //translate text grid to zone spaces
+    /*
+        format:
+                '#' represents a cell in the grid, where the # value is the space (ID) the cell is in
+                '-' represents a grid point without a cell
+                rows parallel to x axis, columns parallel to y axis (z axis in babylon)
+        example:
+                - 0 0 0 - - - -
+                - 0 0 0 - - - -
+                - 0 0 0 1 1 1 1
+                - 0 0 0 1 1 1 1
+                2 2 2 2 1 1 1 1
+                2 2 2 2 1 1 1 1
+    */
+    translate(rows, dx, dy, elevB, elevT, airChng) {
+        //initialize
+        let spaceCells = new Map();
+        let cellID = 0;
+        let x = 0;
+        let y = dy*(rows.length-1);
+
+        //loop through rows
+        for (let i = 0; i < rows.length; i++) {
+            const row = rows[i].split(' ');
+
+            //create cell for each item in row
+            for (let j = 0; j < row.length; j++) {
+                const spaceID = parseFloat(row[j]);
+                if (!isNaN(spaceID)) { //ignore points without cells
+                    const cell = new Cell(this.scene, cellID, dx, dy, elevB, elevT, x, y);
+
+                    if (!spaceCells.has(spaceID)) { //create new space ID if doesn't exist yet
+                        spaceCells.set(spaceID, [cell]);
+                    } else {
+                        spaceCells.get(spaceID).push(cell);
+                    }
+                    cellID++;
+                }
+                x += dx;
+            }
+            x = 0;
+            y -= dy;
+        }
+
+        //create spaces
+        let spaces = [];
+        for (const [spaceID, cells] of spaceCells) {
+            spaces.push(new Space(this.scene, spaceID, cells, airChng.get(spaceID)));
+        }
+        this.set(spaces);
+    }
+
+    //load zone from file
+    async load() {
+        //process file from local browser
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.click();
+    
+        //wrap file selection and reading in a promise
+        await new Promise((resolve, reject) => {
+            input.onchange = () => {
+                const files = input.files;
+                if (files.length > 0) {
+                    const reader = new FileReader();
+                    reader.readAsText(files[0], "utf-8");
+                    reader.onload = () => {
+                        const lines = reader.result.split('\n');
+
+                        //get standard cell properties
+                        const dx = parseFloat(lines[0].split('=')[1]);
+                        const dy = parseFloat(lines[1].split('=')[1]);
+                        const elevB = parseFloat(lines[2].split('=')[1]);
+                        const elevT = parseFloat(lines[3].split('=')[1]);
+
+                        //get air change values
+                        let airChng = new Map();
+                        const pairStr = lines[4].split('=')[1].split(',');
+
+                        for (let i = 0; i < pairStr.length; i++) {
+                            const pair = pairStr[i].split(':');
+                            airChng.set(parseFloat(pair[0]), parseFloat(pair[1]));
+                        }
+                        
+                        //translate file text grid to zone spaces
+                        this.translate(lines.slice(5), dx, dy, elevB, elevT, airChng);
+
+                        resolve(); //resolve promise
+                    };
+                    reader.onerror = () => {
+                        reject(reader.error);  //reject the promise in case of errors
+                    };
+                } else {
+                    reject(new Error("no file selected"));
+                }
+            };
+        });
     }
 }
 
@@ -280,15 +385,14 @@ class MinHeap {
     }
 }
 
-//implements Prim's algorithm with finite, defined Steiner (tree) points to find the minimum spanning tree (mst)
-function primSteiner(graph, start, terminals, steinerPts) {
+//Prim's algorithm to find the minimum spanning tree (mst) from start to terminal vertices
+function prim(graph, start, terminals) {
     //initialize
     const numVert = graph.length;
     const mst = [];
     const visited = new Array(numVert).fill(false);
     const minHeap = new MinHeap();
 
-    //convert terminals & steiner points to sets
     const terminalSet = new Set(terminals);
     let terminalCount = 0;
     const terminalSize = terminals.length;
@@ -382,45 +486,8 @@ const createScene = async function () {
 
     //test code
     ///*
-        let ID = 0;
-        const d = 5;
-        let spaces = [];
-
-        let cells = [];
-        for (let i = 0; i < 3; i++) {
-            for (let j = 0; j < 3; j++) {
-                cells.push(new Cell(scene, ID, d, d, 0, 15, d*i, d*j));
-                ID++;
-            }
-        }
-        spaces.push(new Space(scene, cells, 6));
-
-        cells = [];
-        for (let i = 0; i < 5; i++) {
-            for (let j = 0; j < 5; j++) {
-                cells.push(new Cell(scene, ID, d, d, 0, 15, 15+d*i, d*j));
-                ID++;
-            }
-        }
-        spaces.push(new Space(scene, cells, 6));
-
-        cells = [];
-        for (let i = 0; i < 3; i++) {
-            for (let j = 0; j < 6; j++) {
-                cells.push(new Cell(scene, ID, d, d, 0, 15, d*i, 15+d*j));
-                ID++;
-            }
-        }
-        spaces.push(new Space(scene, cells, 6));
-
-        cells = [];
-        for (let i = 0; i < 5; i++) {
-            for (let j = 0; j < 5; j++) {
-                cells.push(new Cell(scene, ID, d, d, 0, 15, 15+d*i, 25+d*j));
-                ID++;
-            }
-        }
-        spaces.push(new Space(scene, cells, 6));
+        const zone = new Zone(scene, 800);
+        zone.load();
     //*/
 
     //render updates
