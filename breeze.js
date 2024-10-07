@@ -191,7 +191,7 @@ class Zone {
         //initialize properties
         this.scene = scene; //scene hosting zone
         this.spaces = []; //array of spaces in the zone (initialize empty, then load)
-        this.numCells = 0; //# of cells in the zone (initialize zero, then load)
+        this.cells = []; //array of cells in the zone (initialize empty, then load)
         this.grid = []; //2D array (grid) of cells in the zone (initialize empty, then load)
         this.graph = []; //graph of the zone cell grid, storing weights between vertices (initialize empty, then createGraph)
             /*
@@ -229,6 +229,7 @@ class Zone {
     */
     translate(rows, dx, dy, elevB, elevT, airChng) {
         //initialize
+        this.cells = [];
         let spaceCells = new Map();
         let cellID = 0;
         let x = 0;
@@ -244,7 +245,8 @@ class Zone {
                 const spaceID = parseFloat(row[j]);
                 if (!isNaN(spaceID)) { //ignore points without cells
                     const cell = new Cell(this.scene, cellID, dx, dy, elevB, elevT, x, y);
-                    gridRow.push(cell); //update grid
+                    this.cells.push(cell);
+                    gridRow.push(cell);
 
                     if (!spaceCells.has(spaceID)) { //create new space ID if doesn't exist yet
                         spaceCells.set(spaceID, [cell]);
@@ -258,12 +260,10 @@ class Zone {
                 x += dx;
             }
 
-            this.grid.push(gridRow); //update grid
+            this.grid.push(gridRow);
             x = 0;
             y += dy;
         }
-
-        this.numCells = cellID;
 
         //create spaces
         let spaces = [];
@@ -373,7 +373,7 @@ class Zone {
     //create graph from zone cell grid
     createGraph() {
         //initialize empty graph
-        this.graph = Array.from(Array(this.numCells), () => []);
+        this.graph = Array.from(Array(this.cells.length), () => []);
 
         //loop through grid, adding neighbors & weights to the graph at the vertex (cell) index (ID)
         const numRows = this.grid.length;
@@ -539,7 +539,7 @@ const createScene = async function () {
     scene.clearColor = new BABYLON.Color4(1, 1, 1, 1);
 
     //console for debugging
-    const DEBUG = false;
+    const DEBUG = true;
     if (DEBUG) {
         await new Promise(resolve => {
             var s = document.createElement("script");
@@ -591,6 +591,10 @@ const createScene = async function () {
         zone.load().then(() => {
             zone.color();
             zone.createGraph();
+            const mst = prim(zone.graph, 0, [22, 17, 55, 67]);
+            for (let i = 0; i < mst.length; i++) {
+                c3.log(mst[i][0]);
+            }
         });
     //*/
 
