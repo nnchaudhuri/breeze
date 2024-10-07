@@ -140,11 +140,11 @@ class Cell extends Element {
 
         //setup
         this.setupVisuals([1, 1, 1], 0.05);
-        this.genLabel();
+        this.label();
     }
 
     //generate text label per cell ID
-    async genLabel() {
+    async label() {
         const font = await (await fetch("https://assets.babylonjs.com/fonts/Kenney Future Regular.json")).json();
         const text = BABYLON.MeshBuilder.CreateText("ID", this.ID.toString(), font, {size:1, resolution:8, depth:0.1});
 
@@ -190,8 +190,18 @@ class Zone {
     constructor(scene, tgtVel) {
         //initialize properties
         this.scene = scene; //scene hosting zone
-        this.spaces = []; //array of spaces in the zone (initialize empty, then use set or translate func)
-        this.grid = []; //2D array (grid) of cells in the zone (initialize empty, then use translate func)
+        this.spaces = []; //array of spaces in the zone (initialize empty, then load)
+        this.numCells = 0; //# of cells in the zone (initialize zero, then load)
+        this.grid = []; //2D array (grid) of cells in the zone (initialize empty, then load)
+        this.graph = []; //graph of the zone cell grid, storing weights between vertices (initialize empty, then createGraph)
+            /*
+            example:
+                    [
+                        [[1, 2], [2, 3], [4, 5]], //cell 0: connected to cell 1 (weight 2), cell 2 (weight 3), cell 4 (weight 5)
+                        [[0, 2], [3, 4]], //cell 1: connected to cell 0 (weight 2), cell 3 (weight 4)
+                        [[0, 3], [4, 6]], //cell 2: connected to cell 0 (weight 3), cell 4 (weight 6)
+                    ];
+            */
         this.tgtVel = tgtVel; //max target airflow velocity (ft/min = FPM)
     }
 
@@ -253,6 +263,8 @@ class Zone {
             y += dy;
         }
 
+        this.numCells = cellID;
+
         //create spaces
         let spaces = [];
         for (const [spaceID, cells] of spaceCells) {
@@ -310,6 +322,39 @@ class Zone {
 
     //color zone spaces
     color() {
+        //convert HSL to RGB
+        function hslToRgb(h, s, l) {
+            s /= 100;
+            l /= 100;
+
+            const c = (1-Math.abs(2*l-1))*s;
+            const x = c*(1-Math.abs(((h/60)%2)-1));
+            const m = l-c/2;
+
+            let r, g, b;
+
+            if (h < 60) {
+                r = c; g = x; b = 0;
+            } else if (h < 120) {
+                r = x; g = c; b = 0;
+            } else if (h < 180) {
+                r = 0; g = c; b = x;
+            } else if (h < 240) {
+                r = 0; g = x; b = c;
+            } else if (h < 300) {
+                r = x; g = 0; b = c;
+            } else {
+                r = c; g = 0; b = x;
+            }
+
+            return [
+                Math.round((r+m)*255),
+                Math.round((g+m)*255),
+                Math.round((b+m)*255)
+            ];
+        }
+
+        //generate evenly spaced colors
         const n = this.spaces.length;
         const step = 360/n;
         
@@ -319,38 +364,53 @@ class Zone {
             this.spaces[i].mesh.material.diffuseColor = new BABYLON.Color3(rgb[0], rgb[1], rgb[2]);
         }
     }
-}
 
-//convert HSL to RGB
-function hslToRgb(h, s, l) {
-    s /= 100;
-    l /= 100;
-
-    const c = (1-Math.abs(2*l-1))*s;
-    const x = c*(1-Math.abs(((h/60)%2)-1));
-    const m = l-c/2;
-
-    let r, g, b;
-
-    if (h < 60) {
-        r = c; g = x; b = 0;
-    } else if (h < 120) {
-        r = x; g = c; b = 0;
-    } else if (h < 180) {
-        r = 0; g = c; b = x;
-    } else if (h < 240) {
-        r = 0; g = x; b = c;
-    } else if (h < 300) {
-        r = x; g = 0; b = c;
-    } else {
-        r = c; g = 0; b = x;
+    //graph edge weight (cost) between two cells (vertices)
+    weight(cell0, cell1) {
+        return 1; //TEMPORARY
     }
 
-    return [
-        Math.round((r+m)*255),
-        Math.round((g+m)*255),
-        Math.round((b+m)*255)
-    ];
+    //create graph from zone cell grid
+    createGraph() {
+        //initialize empty graph
+        this.graph = Array.from(Array(this.numCells), () => []);
+
+        //loop through grid, adding neighbors & weights to the graph at the vertex (cell) index (ID)
+        const numRows = this.grid.length;
+        for (let i = 0; i < numRows; i++) {
+            const row = this.grid[i];
+            const numCols = row.length;
+
+            for (let j = 0; j < numCols; j++) {
+                const cell = this.grid[i][j];
+                if (cell != null) {
+                    //top neighbor
+                    if (i < numRows-1) {
+                        const top = this.grid[i+1][j];
+                        if (top != null) {this.graph[cell.ID].push([top.ID, this.weight(cell, top)])};
+                    }
+
+                    //bottom neighbor
+                    if (i > 0) {
+                        const bot = this.grid[i-1][j];
+                        if (bot != null) {this.graph[cell.ID].push([bot.ID, this.weight(cell, bot)])};
+                    }
+
+                    //right neighbor
+                    if (j < numCols-1) {
+                        const right = this.grid[i][j+1];
+                        if (right != null) {this.graph[cell.ID].push([right.ID, this.weight(cell, right)])};
+                    }
+
+                    //left neighbor
+                    if (j > 0) {
+                        const left = this.grid[i][j-1];
+                        if (left != null) {this.graph[cell.ID].push([left.ID, this.weight(cell, left)])};
+                    }
+                }
+            }
+        }
+    }
 }
 
 //define minheap class (priority queue returning lowest value node)
@@ -461,25 +521,15 @@ function prim(graph, start, terminals) {
         mst.push([vertex, weight]);
 
         //add neighbors to heap
-        for (const [neighbor, edgeWeight] of graph[vertex]) {
+        for (const [neighbor, weight] of graph[vertex]) {
             if (!visited[neighbor]) {
-                minHeap.insert([neighbor, edgeWeight]);
+                minHeap.insert([neighbor, weight]);
             }
         }
     }
 
     return mst;
 }
-
-/* Example graph
-const graph = [
-    [[1, 2], [2, 3], [4, 5]], // Vertex 0: connected to vertex 1 (weight 2), vertex 2 (weight 3), vertex 4 (weight 5)
-    [[0, 2], [3, 4]], // Vertex 1: connected to vertex 0 (weight 2), vertex 3 (weight 4)
-    [[0, 3], [4, 6]], // Vertex 2: connected to vertex 0 (weight 3), vertex 4 (weight 6)
-    [[1, 4], [4, 7]], // Vertex 3: connected to vertex 1 (weight 4), vertex 4 (weight 7)
-    [[0, 5], [2, 6], [3, 7]]  // Vertex 4: connected to vertex 0 (weight 5), vertex 2 (weight 6), vertex 3 (weight 7)
-];
-*/
 
 //create scene
 const createScene = async function () {
@@ -540,6 +590,7 @@ const createScene = async function () {
         const zone = new Zone(scene, 800);
         zone.load().then(() => {
             zone.color();
+            zone.createGraph();
         });
     //*/
 
