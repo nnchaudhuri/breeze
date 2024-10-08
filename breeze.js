@@ -531,6 +531,105 @@ function prim(graph, start, terminals) {
     return mst;
 }
 
+class PrimAStar {
+    constructor(graph, start, terminals) {
+        this.graph = graph;             // Graph represented as an array of adjacency lists
+        this.start = start;             // Start node (number)
+        this.terminals = new Set(terminals); // Set of target nodes (terminals)
+        this.processedTerminals = new Set(); // Track which terminals have been processed
+        this.openSet = new Set();       // Nodes to be evaluated
+        this.cameFrom = new Map();      // To track the MST/path
+        this.gScore = new Map();        // Cost from start to node
+        this.fScore = new Map();        // Estimated total cost (g + h)
+        this.paths = [];                // Store efficient paths for each terminal
+
+        // Initialize with start node
+        this.gScore.set(this.start, 0);
+        this.fScore.set(this.start, this.heuristic(this.start));
+        this.openSet.add(this.start);
+    }
+
+    // Heuristic: You can customize this. Using a dummy heuristic of 0 here for simplicity.
+    heuristic(node) {
+        // Example: for a more goal-directed search, you could return a distance estimate to the nearest terminal.
+        // Here we keep it simple by returning 0 (like Prim’s algorithm, no forward-looking heuristic).
+        return 0;
+    }
+
+    // Reconstruct the path from the start node to a given terminal
+    reconstructPath(terminal) {
+        let path = [];
+        let current = terminal;
+
+        // Backtrack from the terminal to the start node using the cameFrom map
+        while (current !== undefined) {
+            path.push(current);
+            current = this.cameFrom.get(current);
+        }
+
+        // Reverse the path to get the correct order from start to terminal
+        path.reverse();
+
+        return path;
+    }
+
+    // The main combined Prim-A* search
+    run() {
+        while (this.openSet.size > 0) {
+            // Get node in openSet with lowest fScore (A*-like behavior)
+            let current = null;
+            let lowestF = Infinity;
+            
+            for (let node of this.openSet) {
+                const f = this.fScore.get(node);
+                if (f < lowestF) {
+                    lowestF = f;
+                    current = node;
+                }
+            }
+            
+            // If we've reached a terminal node, store the path and mark it as processed
+            if (this.terminals.has(current) && !this.processedTerminals.has(current)) {
+                const path = this.reconstructPath(current);
+                this.paths.push(path);
+                this.processedTerminals.add(current);
+
+                // If all terminals are processed, return the paths
+                if (this.processedTerminals.size === this.terminals.size) {
+                    return this.paths;
+                }
+            }
+            
+            // Remove current node from openSet
+            this.openSet.delete(current);
+
+            // Process neighbors of the current node
+            for (let [neighbor, weight] of this.graph[current]) {
+                let currentGScore = Infinity;
+                if (this.gScore.has(current)) currentGScore = this.gScore.get(current);
+                const tentativeGScore = currentGScore + weight;
+                
+                // Only proceed if we find a better path
+                let neighborGScore = Infinity;
+                if (this.gScore.has(neighbor)) neighborGScore = this.gScore.get(neighbor);
+                if (tentativeGScore < neighborGScore) {
+                    this.cameFrom.set(neighbor, current); // Track the most efficient path
+                    this.gScore.set(neighbor, tentativeGScore);
+                    this.fScore.set(neighbor, tentativeGScore + this.heuristic(neighbor));
+
+                    // Add to openSet if not already present
+                    if (!this.openSet.has(neighbor)) {
+                        this.openSet.add(neighbor);
+                    }
+                }
+            } 
+        }
+
+        // If we exit the loop without finding all terminals
+        return null;
+    }
+}
+
 //create scene
 const createScene = async function () {
 
@@ -587,15 +686,22 @@ const createScene = async function () {
 
     //test code
     ///*
-        const zone = new Zone(scene, 800);
-        zone.load().then(() => {
-            zone.color();
-            zone.createGraph();
-            const mst = prim(zone.graph, 0, [22, 17, 55, 67]);
-            for (let i = 0; i < mst.length; i++) {
-                c3.log(mst[i][0]);
-            }
-        });
+    const zone = new Zone(scene, 800);
+    const start = 0;
+    const terminals = [22, 17, 55, 67];
+
+    zone.load().then(() => {
+        zone.color();
+        zone.createGraph();
+        c3.log("zone graph created");
+
+        const primAStar = new PrimAStar(zone.graph, start, terminals);
+        c3.log("primAStar created");
+        const paths = primAStar.run();
+        c3.log("primAStar run");
+        c3.log(paths);
+        
+    });
     //*/
 
     //render updates
