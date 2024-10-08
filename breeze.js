@@ -203,6 +203,7 @@ class Zone {
                     ];
             */
         this.tgtVel = tgtVel; //max target airflow velocity (ft/min = FPM)
+        this.ducts = []; //array of ducts in the zone (initialize empty, then createDucts)
     }
 
     //set zone spaces
@@ -409,6 +410,18 @@ class Zone {
                     }
                 }
             }
+        }
+    }
+
+    //create ducts from paths
+    createDucts(paths, elev) {
+        this.ducts = [];
+        for (let path of paths) {
+            const ductPath = [];
+            for (let i = 0; i < path.length-1; i++) {
+                ductPath.push(new RndDuct(this.scene, this.cells[path[i]], this.cells[path[i+1]], elev, elev, 1));
+            }
+            this.ducts.push(ductPath);
         }
     }
 }
@@ -700,7 +713,9 @@ const createScene = async function () {
         const paths = primAStar.run();
         c3.log("primAStar run");
         c3.log(paths);
-        
+
+        zone.createDucts(paths, 18);
+        c3.log("ducts created");
     });
     //*/
 
