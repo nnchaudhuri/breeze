@@ -80,6 +80,25 @@ class RndDuct extends Duct {
     cost() {
         return this.SA;
     }
+
+    //change duct size
+    changeSize(rad) {
+        //update properties
+        this.rad = rad;
+        this.A = Math.PI*Math.pow(rad, 2);
+        this.P = 2*Math.PI*rad;
+        this.V = this.A*this.L;
+        this.SA = this.P*this.L;
+
+        //delete old mesh
+        this.delete();
+
+        //create new mesh
+        this.mesh = BABYLON.MeshBuilder.CreateTube("rndDuct", {path:this.path, radius:rad, sideOrientation:BABYLON.Mesh.DOUBLESIDE}, this.scene);
+
+        //setup
+        this.setupVisuals([1, 1, 1], 1);
+    }
 }
 
 //define rectangular duct class
@@ -116,6 +135,35 @@ class RectDuct extends Duct {
     cost() {
         return this.SA;
     }
+
+    //change duct size
+    changeSize(w, h) {
+        //update properties
+        this.w = w;
+        this.h = h;
+        this.A = w*h;
+        this.P = 2*(w+h);
+        this.V = this.A*this.L;
+        this.SA = this.P*this.L;
+
+        //delete old mesh
+        this.delete();
+
+        //update section shape
+        const shape = [
+            new BABYLON.Vector3(w/2, h/2, 0),
+            new BABYLON.Vector3(-w/2, h/2, 0),
+            new BABYLON.Vector3(-w/2, -h/2, 0),
+            new BABYLON.Vector3(w/2, -h/2, 0)
+        ];
+        shape.push(shape[0]);
+
+        //create new mesh
+        this.mesh = BABYLON.MeshBuilder.ExtrudeShape("rectDuct", {shape:shape, path:this.path, sideOrientation:BABYLON.Mesh.DOUBLESIDE}, this.scene);
+
+        //setup
+        this.setupVisuals([1, 1, 1], 1);
+    }
 }
 
 //define cell class (fundamental area unit)
@@ -135,6 +183,7 @@ class Cell extends Element {
         this.V = this.A*this.h; //volume of cell (ft^3)
         this.x = x; //x coordinate (ft)
         this.y = y; //y coordinate (ft)
+        this.ductCells = new Map(); //keys: other cells sharing ducts with this cell, values: shared ducts
 
         //create cell area shape
         const shape = [
@@ -443,16 +492,37 @@ class Zone {
         this.ducts = [];
         this.cost = 0;
         for (let path of paths) {
-            const ductPath = [];
+            //get terminal space
             const terminal = this.cells[path[path.length-1]];
             const spaceID = terminal.space.ID;
+
+            //calculate duct radius
             const rad = Math.sqrt(terminal.space.airFlow/spaceTerminals.get(spaceID)/this.tgtVel/Math.PI);
-            for (let i = 0; i < path.length-1; i++) {
-                const duct = new RndDuct(this.scene, this.cells[path[i]], this.cells[path[i+1]], elev, elev, rad);
-                ductPath.push(duct);
-                this.cost += duct.cost();
+
+            for (let i = path.length-1; i > 0; i--) { //go from terminal to start
+                //get cells on path
+                const cell0 = this.cells[path[i]];
+                const cell1 = this.cells[path[i-1]];
+
+                if (cell0.ductCells.has(cell1) || cell1.ductCells.has(cell0)) { //duct already between cells
+                    //get existing duct
+                    const exDuct = cell0.ductCells.get(cell1) || cell1.ductCells.get(cell0);
+                    this.cost -= exDuct.cost();
+
+                    //increase existing duct size
+                    const newRad = Math.sqrt(Math.pow(exDuct.rad, 2) + Math.pow(rad, 2));
+                    exDuct.changeSize(newRad);
+                    this.cost += exDuct.cost();
+
+                } else { //create new duct
+                    const duct = new RndDuct(this.scene, cell0, cell1, elev, elev, rad);
+                    this.ducts.push(duct);
+                    this.cost += duct.cost();
+
+                    cell0.ductCells.set(cell1, duct);
+                    cell1.ductCells.set(cell0, duct);
+                }   
             }
-            this.ducts.push(ductPath);
         }
     }
 }
@@ -575,52 +645,51 @@ function prim(graph, start, terminals) {
     return mst;
 }
 
+//define class for Prim-A* integrated algorithm to find the most efficient paths from start to terminal vertices
 class PrimAStar {
     constructor(graph, start, terminals) {
-        this.graph = graph;             // Graph represented as an array of adjacency lists
-        this.start = start;             // Start node (number)
-        this.terminals = new Set(terminals); // Set of target nodes (terminals)
-        this.processedTerminals = new Set(); // Track which terminals have been processed
-        this.openSet = new Set();       // Nodes to be evaluated
-        this.cameFrom = new Map();      // To track the MST/path
-        this.gScore = new Map();        // Cost from start to node
-        this.fScore = new Map();        // Estimated total cost (g + h)
-        this.paths = [];                // Store efficient paths for each terminal
+        this.graph = graph; //graph represented as an array of adjacency lists
+        this.start = start; //start node
+        this.terminals = new Set(terminals); //target nodes
+        this.processedTerminals = new Set(); //track which terminals have been processed
+        this.openSet = new Set(); //nodes to evaluate
+        this.cameFrom = new Map(); //to track the MST/path
+        this.gScore = new Map(); //cost from start to node
+        this.fScore = new Map(); //estimated total cost incl. heuristic
+        this.paths = []; //efficient paths for each terminal
 
-        // Initialize with start node
+        //initialize with start node
         this.gScore.set(this.start, 0);
         this.fScore.set(this.start, this.heuristic(this.start));
         this.openSet.add(this.start);
     }
 
-    // Heuristic: You can customize this. Using a dummy heuristic of 0 here for simplicity.
+    //heuristic, estimate of node distance to target
     heuristic(node) {
-        // Example: for a more goal-directed search, you could return a distance estimate to the nearest terminal.
-        // Here we keep it simple by returning 0 (like Prim’s algorithm, no forward-looking heuristic).
-        return 0;
+        return 0; //TEMPORARY
     }
 
-    // Reconstruct the path from the start node to a given terminal
+    //reconstruct the path from the start node to a given terminal
     reconstructPath(terminal) {
         let path = [];
         let current = terminal;
 
-        // Backtrack from the terminal to the start node using the cameFrom map
+        //backtrack from the terminal to the start node using the cameFrom map
         while (current !== undefined) {
             path.push(current);
             current = this.cameFrom.get(current);
         }
 
-        // Reverse the path to get the correct order from start to terminal
+        //reverse the path to get the correct order from start to terminal
         path.reverse();
 
         return path;
     }
 
-    // The main combined Prim-A* search
+    //run Prim-A* search
     run() {
         while (this.openSet.size > 0) {
-            // Get node in openSet with lowest fScore (A*-like behavior)
+            //get node in openSet with lowest fScore (A*-like behavior)
             let current = null;
             let lowestF = Infinity;
             
@@ -632,36 +701,36 @@ class PrimAStar {
                 }
             }
             
-            // If we've reached a terminal node, store the path and mark it as processed
+            //if terminal node reached, store the path and mark it as processed
             if (this.terminals.has(current) && !this.processedTerminals.has(current)) {
                 const path = this.reconstructPath(current);
                 this.paths.push(path);
                 this.processedTerminals.add(current);
 
-                // If all terminals are processed, return the paths
+                //if all terminals processed, return the paths
                 if (this.processedTerminals.size === this.terminals.size) {
                     return this.paths;
                 }
             }
             
-            // Remove current node from openSet
+            //remove current node from openSet
             this.openSet.delete(current);
 
-            // Process neighbors of the current node
+            //process neighbors of the current node
             for (let [neighbor, weight] of this.graph[current]) {
                 let currentGScore = Infinity;
                 if (this.gScore.has(current)) currentGScore = this.gScore.get(current);
                 const tentativeGScore = currentGScore + weight;
                 
-                // Only proceed if we find a better path
+                //only proceed if found better path
                 let neighborGScore = Infinity;
                 if (this.gScore.has(neighbor)) neighborGScore = this.gScore.get(neighbor);
                 if (tentativeGScore < neighborGScore) {
-                    this.cameFrom.set(neighbor, current); // Track the most efficient path
+                    this.cameFrom.set(neighbor, current); //track the most efficient path
                     this.gScore.set(neighbor, tentativeGScore);
                     this.fScore.set(neighbor, tentativeGScore + this.heuristic(neighbor));
 
-                    // Add to openSet if not already present
+                    //add to openSet if not included
                     if (!this.openSet.has(neighbor)) {
                         this.openSet.add(neighbor);
                     }
@@ -669,7 +738,7 @@ class PrimAStar {
             } 
         }
 
-        // If we exit the loop without finding all terminals
+        //if not all terminals found
         return null;
     }
 }
@@ -732,7 +801,7 @@ const createScene = async function () {
     ///*
     const zone = new Zone(scene, 800);
     const start = 0;
-    const terminals = [22, 17, 55, 67];
+    const terminals = [22, 17, 54, 65];
 
     zone.load().then(() => {
         zone.color();
