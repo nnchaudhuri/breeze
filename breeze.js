@@ -63,17 +63,22 @@ class RndDuct extends Duct {
 
         //initialize properties
         this.type = "rnd"; //duct type
-        this.rad = rad; //duct section radius
-        this.A = Math.PI*Math.pow(rad, 2); //duct section area
-        this.P = 2*Math.PI*rad; //duct section perimeter
-        this.V = this.A*this.L; //duct volume
-        this.SA = this.P*this.L; //duct surface area
+        this.rad = rad; //duct section radius (ft)
+        this.A = Math.PI*Math.pow(rad, 2); //duct section area (ft^2)
+        this.P = 2*Math.PI*rad; //duct section perimeter (ft)
+        this.V = this.A*this.L; //duct volume (ft^3)
+        this.SA = this.P*this.L; //duct surface area (ft^2)
 
         //create duct mesh
         this.mesh = BABYLON.MeshBuilder.CreateTube("rndDuct", {path:this.path, radius:rad, sideOrientation:BABYLON.Mesh.DOUBLESIDE}, this.scene);
 
         //setup
         this.setupVisuals([1, 1, 1], 1);
+    }
+
+    //returns measure of duct cost
+    cost() {
+        return this.SA;
     }
 }
 
@@ -84,12 +89,12 @@ class RectDuct extends Duct {
 
         //initialize properties
         this.type = "rect"; //duct type
-        this.w = w; //duct section width
-        this.h = h; //duct section height
-        this.A = w*h; //duct section area
-        this.P = 2*(w+h); //duct section perimeter
-        this.V = this.A*this.L; //duct volume
-        this.SA = this.P*this.L; //duct surface area
+        this.w = w; //duct section width (ft)
+        this.h = h; //duct section height (ft)
+        this.A = w*h; //duct section area (ft^2)
+        this.P = 2*(w+h); //duct section perimeter (ft)
+        this.V = this.A*this.L; //duct volume (ft^3)
+        this.SA = this.P*this.L; //duct surface area (ft^2)
 
         //create duct section shape
         const shape = [
@@ -105,6 +110,11 @@ class RectDuct extends Duct {
 
         //setup
         this.setupVisuals([1, 1, 1], 1);
+    }
+
+    //returns measure of duct cost
+    cost() {
+        return this.SA;
     }
 }
 
@@ -174,7 +184,7 @@ class Space extends Element {
         
         //calc req'd air flow
         this.airChng = airChng; //req'd air changes (per hr = ACH)
-        this.V = cells.reduce((sum, cell) => sum+cell.V, 0); //space volume
+        this.V = cells.reduce((sum, cell) => sum+cell.V, 0); //space volume (ft^3)
         this.airFlow = this.V*airChng/60; //req'd air flow to space (ft^3/min = CFM)
 
         //create space mesh
@@ -204,6 +214,7 @@ class Zone {
             */
         this.tgtVel = tgtVel; //max target airflow velocity (ft/min = FPM)
         this.ducts = []; //array of ducts in the zone (initialize empty, then createDucts)
+        this.cost = 0; //measure of ducts cost (initialize 0, then createDucts)
     }
 
     //set zone spaces
@@ -415,11 +426,31 @@ class Zone {
 
     //create ducts from paths
     createDucts(paths, elev) {
+        //determine # of terminals per space
+        const spaceTerminals = new Map();
+        for (let path of paths) {
+            const terminal = this.cells[path[path.length-1]];
+            const spaceID = terminal.space.ID;
+            if (spaceTerminals.has(spaceID)) {
+                const numTerminals = spaceTerminals.get(spaceID);
+                spaceTerminals.set(spaceID, numTerminals+1);
+            } else {
+                spaceTerminals.set(spaceID, 1);
+            }
+        }
+
+        //create ducts, sized per airflow requirements
         this.ducts = [];
+        this.cost = 0;
         for (let path of paths) {
             const ductPath = [];
+            const terminal = this.cells[path[path.length-1]];
+            const spaceID = terminal.space.ID;
+            const rad = Math.sqrt(terminal.space.airFlow/spaceTerminals.get(spaceID)/this.tgtVel/Math.PI);
             for (let i = 0; i < path.length-1; i++) {
-                ductPath.push(new RndDuct(this.scene, this.cells[path[i]], this.cells[path[i+1]], elev, elev, 1));
+                const duct = new RndDuct(this.scene, this.cells[path[i]], this.cells[path[i+1]], elev, elev, rad);
+                ductPath.push(duct);
+                this.cost += duct.cost();
             }
             this.ducts.push(ductPath);
         }
@@ -712,10 +743,12 @@ const createScene = async function () {
         c3.log("primAStar created");
         const paths = primAStar.run();
         c3.log("primAStar run");
+        c3.log("paths:");
         c3.log(paths);
 
         zone.createDucts(paths, 18);
         c3.log("ducts created");
+        c3.log("cost: " + Math.round(zone.cost.toString()));
     });
     //*/
 
