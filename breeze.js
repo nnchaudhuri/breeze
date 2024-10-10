@@ -422,7 +422,7 @@ class Zone {
         for (let i = 0; i < n; i++) {
             const hue = i*step;
             const rgb = hslToRgb(hue, 100, 50);
-            this.spaces[i].mesh.material.diffuseColor = new BABYLON.Color3(rgb[0], rgb[1], rgb[2]);
+            this.spaces[i].setupVisuals([rgb[0]/255, rgb[1]/255, rgb[2]/255], 0.5);
         }
     }
 
@@ -860,15 +860,15 @@ const createScene = async function () {
     }
 
     //setup camera
-	const camera = new BABYLON.ArcRotateCamera("camera", -Math.PI/4, Math.PI/4, 100, BABYLON.Vector3.Zero());
+	const camera = new BABYLON.ArcRotateCamera("camera", -Math.PI/4, Math.PI/8, 100, BABYLON.Vector3.Zero());
 	camera.attachControl(canvas, true);
     camera.inputs.attached.keyboard.angularSpeed = 0.005;
     camera.minZ = 0.01;
     camera.maxZ = 1000;
     camera.wheelDeltaPercentage = 0.01;
     camera.mode = BABYLON.Camera.ORTHOGRAPHIC_CAMERA;
-    camera.orthoLeft = -36;
-    camera.orthoRight = 36;
+    camera.orthoLeft = -50;
+    camera.orthoRight = 50;
     const ratio = canvas.height/canvas.width;
     const setOrthoCameraTopBottom = (camera, ratio) => {
         camera.orthoTop = camera.orthoRight*ratio;
@@ -896,7 +896,7 @@ const createScene = async function () {
     ///*
     const zone = new Zone(scene, 800);
     const start = 0;
-    const terminals = [22, 17, 54, 65];
+    const terminals = [28, 75, 162, 131, 62, 120, 184, 32, 141, 71, 24];
     const elev = 18;
 
     const minNear = -1;
