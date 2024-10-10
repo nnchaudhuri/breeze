@@ -525,6 +525,23 @@ class Zone {
             }
         }
     }
+
+    //clear zone ducts
+    clearDucts() {
+        //reset cell duct maps
+        for (let cell of this.cells) {
+            cell.ductCells = new Map();
+        }
+
+        //delete duct meshes
+        for (let duct of this.ducts) {
+            duct.delete();
+        }
+
+        //reset duct & cost properties
+        this.ducts = [];
+        this.cost = 0;
+    }
 }
 
 //define minheap class (priority queue returning lowest value node)
@@ -647,13 +664,14 @@ function prim(graph, start, terminals) {
 
 //define class for Prim-A* integrated algorithm to find the most efficient paths from start to terminal vertices
 class PrimAStar {
-    constructor(zone, start, terminals) {
+    constructor(zone, start, terminals, nearWeight, avgWeight) {
         this.zone = zone; //zone the algorithm is run on
         this.graph = zone.graph; //graph represented as an array of adjacency lists
         this.start = start; //start node
         this.terminals = new Set(terminals); //target nodes
         this.processedTerminals = new Set(); //track which terminals have been processed
-        this.avgTerminal = this.average(terminals); //coordinate average of the terminals [xAvg, yAvg]
+        this.nearWeight = nearWeight; //weight factor for nearest terminal in heuristic
+        this.avgWeight = avgWeight; //weight factor for average terminal in heuristic
         this.openSet = new Set(); //nodes to evaluate
         this.cameFrom = new Map(); //to track the MST/path
         this.gScore = new Map(); //cost from start to node
@@ -666,32 +684,55 @@ class PrimAStar {
         this.openSet.add(this.start);
     }
 
-    //returns coordinate average of the terminals
-    average(terminals) {
-        let xAvg = 0;
-        let yAvg = 0;
-        for (let terminal of terminals) {
-            const cell = this.zone.cells[terminal];
-            xAvg += cell.x;
-            yAvg += cell.y;
-        }
-
-        const numTerminals = terminals.length;
-        xAvg = xAvg/numTerminals;
-        yAvg = yAvg/numTerminals;
-        return [xAvg, yAvg];
+    //manhattan distance
+    manhattanDist(x1, y1, x2, y2) {
+        return (Math.abs(x1-x2) + Math.abs(y1-y2));
     }
 
-    //distance to average terminal
+    //distance to average terminal (remaining)
     distAvgTerminal(node) {
         const cell = this.zone.cells[node];
-        const manhattanDist = Math.abs(cell.x - this.avgTerminal[0]) + Math.abs(cell.y - this.avgTerminal[1]);
-        return manhattanDist;
+
+        let sumDist = 0;
+        let numTerminals = 0;
+        for (let terminal of this.terminals) {
+            if (!this.processedTerminals.has(terminal)) {
+                const terminalCell = this.zone.cells[terminal];
+                sumDist += this.manhattanDist(cell.x, cell.y, terminalCell.x, terminalCell.y);
+                numTerminals++;
+            }
+        }
+
+        if (numTerminals == 0) {
+            return 0;
+        } else {
+            return (sumDist/numTerminals);
+        }
+    }
+
+    //distance to nearest terminal (remaining)
+    distNearTerminal(node) {
+        const cell = this.zone.cells[node];
+
+        let minDist = Infinity;
+        for (let terminal of this.terminals) {
+            if (!this.processedTerminals.has(terminal)) {
+                const terminalCell = this.zone.cells[terminal];
+                const dist = this.manhattanDist(cell.x, cell.y, terminalCell.x, terminalCell.y);
+                if (dist < minDist) minDist = dist;
+            }
+        }
+
+        if (minDist == Infinity) {
+            return 0;
+        } else {
+            return minDist;
+        }
     }
 
     //heuristic to improve path efficiency
     heuristic(node) {
-        return this.distAvgTerminal(node);
+        return (this.nearWeight*this.distNearTerminal(node) + this.avgWeight*this.distAvgTerminal(node));
     }
 
     //reconstruct the path from the start node to a given terminal
@@ -768,6 +809,35 @@ class PrimAStar {
     }
 }
 
+//helper function to delay time
+function delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+//find best solution by batch-running Prim-A* with different near & average terminal weightings
+async function batchPrimAStar(zone, start, terminals, minNear, incrNear, maxNear, minAvg, incrAvg, maxAvg, elev, animate) {
+    let bestPaths = [];
+    let minCost = Infinity;
+    
+    for (let nearWeight = minNear; nearWeight <= maxNear; nearWeight += incrNear) {
+        for (let avgWeight = minAvg; avgWeight <= maxAvg; avgWeight += incrAvg) {
+            const primAStar = new PrimAStar(zone, start, terminals, nearWeight, avgWeight);
+            const paths = primAStar.run();
+            zone.createDucts(paths, elev);
+
+            if (zone.cost < minCost) {
+                minCost = zone.cost;
+                bestPaths = paths;
+            }
+
+            if (animate) await delay(10);
+            zone.clearDucts();
+        }
+    }
+
+    return [bestPaths, minCost];
+}
+
 //create scene
 const createScene = async function () {
 
@@ -827,23 +897,27 @@ const createScene = async function () {
     const zone = new Zone(scene, 800);
     const start = 0;
     const terminals = [22, 17, 54, 65];
+    const elev = 18;
 
-    zone.load().then(() => {
+    const minNear = -1;
+    const incrNear = 0.05;
+    const maxNear = 1;
+
+    const minAvg = 1;
+    const incrAvg = 0.05;
+    const maxAvg = 1;
+
+    zone.load().then(async () => {
         zone.color();
         zone.createGraph();
-        c3.log("zone graph created");
 
-        const primAStar = new PrimAStar(zone, start, terminals);
-        c3.log("primAStar created");
-        const paths = primAStar.run();
-        c3.log("primAStar run");
-        c3.log("paths:");
-        c3.log(paths);
+        const [bestPaths, minCost] = await batchPrimAStar(zone, start, terminals, minNear, incrNear, maxNear, minAvg, incrAvg, maxAvg, elev, true);
 
-        zone.createDucts(paths, 18);
-        c3.log("ducts created");
-        c3.log("cost: " + Math.round(zone.cost.toString()));
+        zone.createDucts(bestPaths, elev);
+        c3.log("cost: " + Math.round(minCost));
     });
+
+    
     //*/
 
     //render updates
