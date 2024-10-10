@@ -860,7 +860,7 @@ const createScene = async function () {
     }
 
     //setup camera
-	const camera = new BABYLON.ArcRotateCamera("camera", -Math.PI/4, Math.PI/8, 100, BABYLON.Vector3.Zero());
+	const camera = new BABYLON.ArcRotateCamera("camera", -3*Math.PI/4, Math.PI/8, 100, BABYLON.Vector3.Zero());
 	camera.attachControl(canvas, true);
     camera.inputs.attached.keyboard.angularSpeed = 0.005;
     camera.minZ = 0.01;
