@@ -903,7 +903,7 @@ const createScene = async function () {
     const incrNear = 0.05;
     const maxNear = 1;
 
-    const minAvg = 1;
+    const minAvg = -1;
     const incrAvg = 0.05;
     const maxAvg = 1;
 
