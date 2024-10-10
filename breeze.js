@@ -647,11 +647,13 @@ function prim(graph, start, terminals) {
 
 //define class for Prim-A* integrated algorithm to find the most efficient paths from start to terminal vertices
 class PrimAStar {
-    constructor(graph, start, terminals) {
-        this.graph = graph; //graph represented as an array of adjacency lists
+    constructor(zone, start, terminals) {
+        this.zone = zone; //zone the algorithm is run on
+        this.graph = zone.graph; //graph represented as an array of adjacency lists
         this.start = start; //start node
         this.terminals = new Set(terminals); //target nodes
         this.processedTerminals = new Set(); //track which terminals have been processed
+        this.avgTerminal = this.average(terminals); //coordinate average of the terminals [xAvg, yAvg]
         this.openSet = new Set(); //nodes to evaluate
         this.cameFrom = new Map(); //to track the MST/path
         this.gScore = new Map(); //cost from start to node
@@ -664,9 +666,32 @@ class PrimAStar {
         this.openSet.add(this.start);
     }
 
-    //heuristic, estimate of node distance to target
+    //returns coordinate average of the terminals
+    average(terminals) {
+        let xAvg = 0;
+        let yAvg = 0;
+        for (let terminal of terminals) {
+            const cell = this.zone.cells[terminal];
+            xAvg += cell.x;
+            yAvg += cell.y;
+        }
+
+        const numTerminals = terminals.length;
+        xAvg = xAvg/numTerminals;
+        yAvg = yAvg/numTerminals;
+        return [xAvg, yAvg];
+    }
+
+    //distance to average terminal
+    distAvgTerminal(node) {
+        const cell = this.zone.cells[node];
+        const manhattanDist = Math.abs(cell.x - this.avgTerminal[0]) + Math.abs(cell.y - this.avgTerminal[1]);
+        return manhattanDist;
+    }
+
+    //heuristic to improve path efficiency
     heuristic(node) {
-        return 0; //TEMPORARY
+        return this.distAvgTerminal(node);
     }
 
     //reconstruct the path from the start node to a given terminal
@@ -808,7 +833,7 @@ const createScene = async function () {
         zone.createGraph();
         c3.log("zone graph created");
 
-        const primAStar = new PrimAStar(zone.graph, start, terminals);
+        const primAStar = new PrimAStar(zone, start, terminals);
         c3.log("primAStar created");
         const paths = primAStar.run();
         c3.log("primAStar run");
