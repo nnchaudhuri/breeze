@@ -897,6 +897,7 @@ function delay(ms) {
 
 //find best solution by batch-running Prim-A* with different near & average terminal weightings
 async function batchPrimAStar(zone, start, terminals, minNear, incrNear, maxNear, minAvg, incrAvg, maxAvg, minFerm, incrFerm, maxFerm, elev, animate) {
+    let allPaths = new Set();
     let bestPaths = [];
     let minCost = Infinity;
     
@@ -905,15 +906,19 @@ async function batchPrimAStar(zone, start, terminals, minNear, incrNear, maxNear
             for (let fermWeight = minFerm; fermWeight <= maxFerm; fermWeight += incrFerm) {
                 const primAStar = new PrimAStar(zone, start, terminals, nearWeight, avgWeight, fermWeight);
                 const paths = primAStar.run();
-                zone.createDucts(paths, elev);
 
-                if (zone.cost < minCost) {
-                    minCost = zone.cost;
-                    bestPaths = paths;
+                if (!allPaths.has(paths)) {
+                    allPaths.add(paths);
+                    zone.createDucts(paths, elev);
+
+                    if (zone.cost < minCost) {
+                        minCost = zone.cost;
+                        bestPaths = paths;
+                    }
+
+                    if (animate) await delay(5);
+                    zone.clearDucts();
                 }
-
-                if (animate) await delay(10);
-                zone.clearDucts();
             }
         }
     }
@@ -982,15 +987,15 @@ const createScene = async function () {
     const terminals = [28, 75, 162, 131, 62, 120, 184, 32, 141, 71, 24];
     const elev = 18;
 
-    const minNear = -1;
+    const minNear = 0;
     const incrNear = 0.1;
     const maxNear = 1;
 
-    const minAvg = -1;
+    const minAvg = 0;
     const incrAvg = 0.1;
     const maxAvg = 1;
 
-    const minFerm = -1;
+    const minFerm = 0;
     const incrFerm = 0.1;
     const maxFerm = 1;
 
