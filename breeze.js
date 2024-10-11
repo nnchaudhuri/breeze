@@ -217,6 +217,37 @@ class Cell extends Element {
     }
 }
 
+//define block class (impassable area unit)
+class Block extends Element {
+    constructor(scene, dx, dy, elevB, elevT, x, y) {
+        super(scene);
+
+        //initialize properties
+        this.dx = dx; //x length of cell (ft)
+        this.dy = dy; //y length of cell (ft)
+        this.elevB = elevB; //elevation at cell bottom (ft)
+        this.elevT = elevT; //elevation at cell top (ft)
+        this.h = elevT-elevB; //height of cell (ft)
+        this.x = x; //x coordinate (ft)
+        this.y = y; //y coordinate (ft)
+
+        //create block area shape
+        const shape = [
+            new BABYLON.Vector3(x+dx/2, 0, y+dy/2),
+            new BABYLON.Vector3(x-dx/2, 0, y+dy/2),
+            new BABYLON.Vector3(x-dx/2, 0, y-dy/2),
+            new BABYLON.Vector3(x+dx/2, 0, y-dy/2)
+        ];
+
+        //create block mesh
+        this.mesh = BABYLON.MeshBuilder.ExtrudePolygon("block", {shape:shape, depth:this.h, sideOrientation:BABYLON.Mesh.DOUBLESIDE}, this.scene);
+        this.mesh.translate(new BABYLON.Vector3(0, elevT, 0), 1, BABYLON.Space.WORLD);
+
+        //setup
+        this.setupVisuals([0, 0, 0], 0.75);
+    }
+}
+
 //define space class (collection of adjacent cells)
 class Space extends Element {
     constructor(scene, ID, cells, airChng) {
@@ -251,6 +282,7 @@ class Zone {
         this.scene = scene; //scene hosting zone
         this.spaces = []; //array of spaces in the zone (initialize empty, then load)
         this.cells = []; //array of cells in the zone (initialize empty, then load)
+        this.blocks = []; //array of blocks in the zone (initialize empty, then load)
         this.grid = []; //2D array (grid) of cells in the zone (initialize empty, then load)
         this.graph = []; //graph of the zone cell grid, storing weights between vertices (initialize empty, then createGraph)
             /*
@@ -278,14 +310,15 @@ class Zone {
     /*
         format:
                 '#' represents a cell in the grid, where the # value is the space (ID) the cell is in
+                'x' represents a block (impassable)
                 '-' represents a grid point without a cell
                 rows parallel to x axis, columns parallel to y axis (z axis in babylon)
         example:
                 - 0 0 0 - - - -
                 - 0 0 0 - - - -
-                - 0 0 0 1 1 1 1
-                - 0 0 0 1 1 1 1
-                2 2 2 2 1 1 1 1
+                - 0 x 0 1 1 1 1
+                - 0 0 0 x 1 1 1
+                2 2 2 2 x 1 1 1
                 2 2 2 2 1 1 1 1
     */
     translate(rows, dx, dy, elevB, elevT, airChng) {
@@ -316,6 +349,9 @@ class Zone {
                     }
                     cellID++;
                 } else {
+                    if (row[j] == 'x') { //create block
+                        this.blocks.push(new Block(this.scene, dx, dy, elevB, elevT, x, y));
+                    }
                     gridRow.push(null);
                 }
                 x += dx;
