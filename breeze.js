@@ -326,12 +326,26 @@ class Zone {
         this.cells = [];
         let spaceCells = new Map();
         let cellID = 0;
-        let x = 0;
-        let y = 0;
 
-        //loop through rows
+        //get size of zone
+        const sizeY = rows.length;
+        let sizeX = 0;
+        let splitRows = [];
         for (let i = rows.length-1; i >= 0; i--) {
             const row = rows[i].split(' ');
+            splitRows.push(row);
+            if (row.length > sizeX) sizeX = row.length;
+        }
+
+        //set starting coordinates
+        const startX = -sizeX*dx/2;
+        const startY = -sizeY*dy/2;
+        let x = startX;
+        let y = startY;
+
+        //loop through rows
+        for (let i = splitRows.length-1; i >= 0; i--) {
+            const row = splitRows[i];
             let gridRow = [];
 
             //create cell for each item in row
@@ -358,7 +372,7 @@ class Zone {
             }
 
             this.grid.push(gridRow);
-            x = 0;
+            x = startX;
             y += dy;
         }
 
@@ -948,7 +962,7 @@ const createScene = async function () {
     }
 
     //setup camera
-	const camera = new BABYLON.ArcRotateCamera("camera", -3*Math.PI/4, Math.PI/8, 100, BABYLON.Vector3.Zero());
+	const camera = new BABYLON.ArcRotateCamera("camera", -9*Math.PI/16, Math.PI/8, 100, BABYLON.Vector3.Zero());
 	camera.attachControl(canvas, true);
     camera.inputs.attached.keyboard.angularSpeed = 0.005;
     camera.minZ = 0.01;
