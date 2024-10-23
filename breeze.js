@@ -166,26 +166,21 @@ class RectDuct extends Duct {
     }
 }
 
-//define cell class (fundamental area unit)
-class Cell extends Element {
-    constructor(scene, ID, dx, dy, elevB, elevT, x, y) {
+//define prism class (volume unit)
+class Prism extends Element {
+    constructor(scene, dx, dy, elevB, elevT, x, y) {
         super(scene);
 
         //initialize properties
-        this.space = null; //space the cell is within
-        this.ID = ID; //cell ID # (graph vertex)
-        this.dx = dx; //x length of cell (ft)
-        this.dy = dy; //y length of cell (ft)
-        this.elevB = elevB; //elevation at cell bottom (ft)
-        this.elevT = elevT; //elevation at cell top (ft)
-        this.h = elevT-elevB; //height of cell (ft)
-        this.A = dx*dy; //area of cell (ft^2)
-        this.V = this.A*this.h; //volume of cell (ft^3)
+        this.dx = dx; //x length of prism (ft)
+        this.dy = dy; //y length of prism (ft)
+        this.elevB = elevB; //elevation at prism bottom (ft)
+        this.elevT = elevT; //elevation at prism top (ft)
+        this.h = elevT-elevB; //height of prism (ft)
         this.x = x; //x coordinate (ft)
         this.y = y; //y coordinate (ft)
-        this.ductCells = new Map(); //keys: other cells sharing ducts with this cell, values: shared ducts
-
-        //create cell area shape
+        
+        //create prism area shape
         const shape = [
             new BABYLON.Vector3(x+dx/2, 0, y+dy/2),
             new BABYLON.Vector3(x-dx/2, 0, y+dy/2),
@@ -193,9 +188,23 @@ class Cell extends Element {
             new BABYLON.Vector3(x+dx/2, 0, y-dy/2)
         ];
 
-        //create cell mesh
-        this.mesh = BABYLON.MeshBuilder.ExtrudePolygon("cell", {shape:shape, depth:this.h, sideOrientation:BABYLON.Mesh.DOUBLESIDE}, this.scene);
+        //create prism mesh
+        this.mesh = BABYLON.MeshBuilder.ExtrudePolygon("", {shape:shape, depth:this.h, sideOrientation:BABYLON.Mesh.DOUBLESIDE}, this.scene);
         this.mesh.translate(new BABYLON.Vector3(0, elevT, 0), 1, BABYLON.Space.WORLD);
+    }
+}
+
+//define cell class (open unit comprising space)
+class Cell extends Prism {
+    constructor(scene, dx, dy, elevB, elevT, x, y, ID) {
+        super(scene, dx, dy, elevB, elevT, x, y);
+
+        //initialize properties
+        this.A = dx*dy; //area of cell (ft^2)
+        this.V = this.A*this.h; //volume of cell (ft^3)
+        this.space = null; //space the cell is within
+        this.ID = ID; //cell ID # (graph vertex)
+        this.ductCells = new Map(); //keys: other cells sharing ducts with this cell, values: shared ducts
 
         //setup
         this.setupVisuals([1, 1, 1], 0.05);
@@ -217,31 +226,10 @@ class Cell extends Element {
     }
 }
 
-//define block class (impassable area unit)
-class Block extends Element {
+//define block class (closed unit comprising space)
+class Block extends Prism {
     constructor(scene, dx, dy, elevB, elevT, x, y) {
-        super(scene);
-
-        //initialize properties
-        this.dx = dx; //x length of cell (ft)
-        this.dy = dy; //y length of cell (ft)
-        this.elevB = elevB; //elevation at cell bottom (ft)
-        this.elevT = elevT; //elevation at cell top (ft)
-        this.h = elevT-elevB; //height of cell (ft)
-        this.x = x; //x coordinate (ft)
-        this.y = y; //y coordinate (ft)
-
-        //create block area shape
-        const shape = [
-            new BABYLON.Vector3(x+dx/2, 0, y+dy/2),
-            new BABYLON.Vector3(x-dx/2, 0, y+dy/2),
-            new BABYLON.Vector3(x-dx/2, 0, y-dy/2),
-            new BABYLON.Vector3(x+dx/2, 0, y-dy/2)
-        ];
-
-        //create block mesh
-        this.mesh = BABYLON.MeshBuilder.ExtrudePolygon("block", {shape:shape, depth:this.h, sideOrientation:BABYLON.Mesh.DOUBLESIDE}, this.scene);
-        this.mesh.translate(new BABYLON.Vector3(0, elevT, 0), 1, BABYLON.Space.WORLD);
+        super(scene, dx, dy, elevB, elevT, x, y);
 
         //setup
         this.setupVisuals([0, 0, 0], 0.75);
@@ -352,7 +340,7 @@ class Zone {
             for (let j = 0; j < row.length; j++) {
                 const spaceID = parseFloat(row[j]);
                 if (!isNaN(spaceID)) { //ignore points without cells
-                    const cell = new Cell(this.scene, cellID, dx, dy, elevB, elevT, x, y);
+                    const cell = new Cell(this.scene, dx, dy, elevB, elevT, x, y, cellID);
                     this.cells.push(cell);
                     gridRow.push(cell);
 
