@@ -194,7 +194,31 @@ class Prism extends Element {
     }
 }
 
-//define cell class (open unit comprising space)
+//define void class (passable volume)
+class Void extends Prism {
+    constructor(scene, dx, dy, elevB, elevT, x, y, ID) {
+        super(scene, dx, dy, elevB, elevT, x, y);
+
+        //initialize properties
+        this.ID = ID; //void ID # (graph vertex)
+        this.ductVoids = new Map(); //keys: other voids sharing ducts with this voids, values: shared ducts
+
+        //setup
+        this.setupVisuals([0, 0, 0], 0.05);
+    }
+}
+
+//define block class (impassable volume)
+class Block extends Prism {
+    constructor(scene, dx, dy, elevB, elevT, x, y) {
+        super(scene, dx, dy, elevB, elevT, x, y);
+
+        //setup
+        this.setupVisuals([0, 0, 0], 0.75);
+    }
+}
+
+//define cell class (fundamental unit of space)
 class Cell extends Prism {
     constructor(scene, dx, dy, elevB, elevT, x, y, ID) {
         super(scene, dx, dy, elevB, elevT, x, y);
@@ -203,8 +227,7 @@ class Cell extends Prism {
         this.A = dx*dy; //area of cell (ft^2)
         this.V = this.A*this.h; //volume of cell (ft^3)
         this.space = null; //space the cell is within
-        this.ID = ID; //cell ID # (graph vertex)
-        this.ductCells = new Map(); //keys: other cells sharing ducts with this cell, values: shared ducts
+        this.ID = ID; //cell ID #
 
         //setup
         this.setupVisuals([1, 1, 1], 0.05);
@@ -223,16 +246,6 @@ class Cell extends Prism {
         const textMat = new BABYLON.StandardMaterial("textMat", this.scene);
         textMat.diffuseColor = new BABYLON.Color3(0, 0, 0);
         text.material = textMat;
-    }
-}
-
-//define block class (closed unit comprising space)
-class Block extends Prism {
-    constructor(scene, dx, dy, elevB, elevT, x, y) {
-        super(scene, dx, dy, elevB, elevT, x, y);
-
-        //setup
-        this.setupVisuals([0, 0, 0], 0.75);
     }
 }
 
@@ -271,14 +284,14 @@ class Zone {
         this.spaces = []; //array of spaces in the zone (initialize empty, then load)
         this.cells = []; //array of cells in the zone (initialize empty, then load)
         this.blocks = []; //array of blocks in the zone (initialize empty, then load)
-        this.grid = []; //2D array (grid) of cells in the zone (initialize empty, then load)
-        this.graph = []; //graph of the zone cell grid, storing weights between vertices (initialize empty, then createGraph)
+        this.voids = []; //3D array of voids in the zone (initialize empty, then load)
+        this.graph = []; //graph of the zone voids, storing weights between vertices (initialize empty, then createGraph)
             /*
             example:
                     [
-                        [[1, 2], [2, 3], [4, 5]], //cell 0: connected to cell 1 (weight 2), cell 2 (weight 3), cell 4 (weight 5)
-                        [[0, 2], [3, 4]], //cell 1: connected to cell 0 (weight 2), cell 3 (weight 4)
-                        [[0, 3], [4, 6]], //cell 2: connected to cell 0 (weight 3), cell 4 (weight 6)
+                        [[1, 2], [2, 3], [4, 5]], //void 0: connected to void 1 (weight 2), void 2 (weight 3), void 4 (weight 5)
+                        [[0, 2], [3, 4]], //void 1: connected to void 0 (weight 2), void 3 (weight 4)
+                        [[0, 3], [4, 6]], //void 2: connected to void 0 (weight 3), void 4 (weight 6)
                     ];
             */
         this.tgtVel = tgtVel; //max target airflow velocity (ft/min = FPM)
@@ -294,8 +307,9 @@ class Zone {
         }
     }
 
-    //translate text to zone spaces & grid
+    //translate text to zone spaces
     /*
+    cells:
         format:
                 '#' represents a cell in the grid, where the # value is the space (ID) the cell is in
                 'x' represents a block (impassable)
@@ -308,20 +322,28 @@ class Zone {
                 - 0 0 0 x 1 1 1
                 2 2 2 2 x 1 1 1
                 2 2 2 2 1 1 1 1
+    voids (at each specified elevation):
+        format:
+                'o' represents a void in the grid
+                'x' represents a block (impassable)
+                '-' represents a grid point without a cell
+                rows parallel to x axis, columns parallel to y axis (z axis in babylon)
+        example:
+                - o o o - - - -
+                - o o o - - - -
+                - o x o o o o o
+                - o o o x o o o
+                o o o o x o o o
+                o o o o o o o o
     */
-    translate(rows, dx, dy, elevB, elevT, airChng) {
-        //initialize
-        this.cells = [];
-        let spaceCells = new Map();
-        let cellID = 0;
-
+    translate(numRows, dx, dy, elevB, elevT, airChng, lines) {
         //get size of zone
-        const sizeY = rows.length;
+        const sizeY = numRows;
         let sizeX = 0;
-        let splitRows = [];
-        for (let i = 0; i < rows.length; i++) {
-            const row = rows[i].split(' ');
-            splitRows.push(row);
+        let rows = [];
+        for (let i = 0; i < numRows; i++) {
+            const row = lines[i].split(' ');
+            rows.push(row);
             if (row.length > sizeX) sizeX = row.length;
         }
 
@@ -331,18 +353,19 @@ class Zone {
         let x = startX;
         let y = startY;
 
-        //loop through rows
-        for (let i = splitRows.length-1; i >= 0; i--) {
-            const row = splitRows[i];
-            let gridRow = [];
+        //create cells
+        this.cells = [];
+        let spaceCells = new Map();
+        let cellID = 0;
+        for (let i = rows.length-1; i >= 0; i--) {
+            const row = rows[i];
 
-            //create cell for each item in row
+            //create cells or blocks for each item in row
             for (let j = 0; j < row.length; j++) {
                 const spaceID = parseFloat(row[j]);
                 if (!isNaN(spaceID)) { //ignore points without cells
                     const cell = new Cell(this.scene, dx, dy, elevB, elevT, x, y, cellID);
                     this.cells.push(cell);
-                    gridRow.push(cell);
 
                     if (!spaceCells.has(spaceID)) { //create new space ID if doesn't exist yet
                         spaceCells.set(spaceID, [cell]);
@@ -354,15 +377,14 @@ class Zone {
                     if (row[j] == 'x') { //create block
                         this.blocks.push(new Block(this.scene, dx, dy, elevB, elevT, x, y));
                     }
-                    gridRow.push(null);
                 }
                 x += dx;
             }
 
-            this.grid.push(gridRow);
             x = startX;
             y += dy;
         }
+        y = startY;
 
         //create spaces
         let spaces = [];
@@ -370,6 +392,46 @@ class Zone {
             spaces.push(new Space(this.scene, spaceID, cells, airChng.get(spaceID)));
         }
         this.set(spaces);
+
+        //create voids
+        this.voids = [];
+        let voidID = 0;
+        let elevBVoid = elevT;
+        for (let i = numRows; i < lines.length; i += (numRows+1)) {
+            //get elevation
+            const elevTVoid = parseFloat(lines[i].split('=')[1]);
+
+            //create voids or blocks for each item in row
+            let voidLevel = [];
+            for (let j = numRows; j > 0; j--) {
+                let voidRow = [];
+                const row = lines[i+j].split(' ');
+
+                for (let k = 0; k < row.length; k++) {
+                    const val = row[k];
+                    if (val == 'o') { //create void
+                        const vd = new Void(this.scene, dx, dy, elevBVoid, elevTVoid, x, y, voidID);
+                        voidRow.push(vd);
+
+                        voidID++;
+                    } else {
+                        if (val == 'x') { //create block
+                            this.blocks.push(new Block(this.scene, dx, dy, elevBVoid, elevTVoid, x, y));
+                        }
+                        voidRow.push(null);
+                    }
+                    x += dx;
+                }
+                x = startX;
+                y += dy;
+
+                voidLevel.push(voidRow);
+            }
+            y = startY;
+            elevBVoid = elevTVoid;
+
+            this.voids.push(voidLevel);
+        }
     }
 
     //load zone from file
@@ -389,23 +451,26 @@ class Zone {
                     reader.onload = () => {
                         const lines = reader.result.split('\n');
 
+                        //get # of rows in zone
+                        const numRows = parseFloat(lines[0].split('=')[1]);
+
                         //get standard cell properties
-                        const dx = parseFloat(lines[0].split('=')[1]);
-                        const dy = parseFloat(lines[1].split('=')[1]);
-                        const elevB = parseFloat(lines[2].split('=')[1]);
-                        const elevT = parseFloat(lines[3].split('=')[1]);
+                        const dx = parseFloat(lines[1].split('=')[1]);
+                        const dy = parseFloat(lines[2].split('=')[1]);
+                        const elevB = parseFloat(lines[3].split('=')[1]);
+                        const elevT = parseFloat(lines[4].split('=')[1]);
 
                         //get air change values
                         let airChng = new Map();
-                        const pairStr = lines[4].split('=')[1].split(',');
+                        const pairStr = lines[5].split('=')[1].split(',');
 
                         for (let i = 0; i < pairStr.length; i++) {
                             const pair = pairStr[i].split(':');
                             airChng.set(parseFloat(pair[0]), parseFloat(pair[1]));
                         }
-                        
+
                         //translate file text grid to zone spaces
-                        this.translate(lines.slice(5), dx, dy, elevB, elevT, airChng);
+                        this.translate(numRows, dx, dy, elevB, elevT, airChng, lines.slice(6));
 
                         resolve(); //resolve promise
                     };
@@ -1003,6 +1068,8 @@ const createScene = async function () {
 
     zone.load().then(async () => {
         zone.color();
+
+        /*
         zone.createGraph();
 
         const [bestPaths, minCost] = await batchPrimAStar(zone, start, terminals, 
@@ -1013,6 +1080,7 @@ const createScene = async function () {
 
         zone.createDucts(bestPaths, elev);
         c3.log("cost: " + Math.round(minCost));
+        */
     });
 
     
