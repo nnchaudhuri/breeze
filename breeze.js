@@ -331,7 +331,7 @@ class Zone {
         const sizeY = rows.length;
         let sizeX = 0;
         let splitRows = [];
-        for (let i = rows.length-1; i >= 0; i--) {
+        for (let i = 0; i < rows.length; i++) {
             const row = rows[i].split(' ');
             splitRows.push(row);
             if (row.length > sizeX) sizeX = row.length;
@@ -962,7 +962,7 @@ const createScene = async function () {
     }
 
     //setup camera
-	const camera = new BABYLON.ArcRotateCamera("camera", -9*Math.PI/16, Math.PI/8, 100, BABYLON.Vector3.Zero());
+	const camera = new BABYLON.ArcRotateCamera("camera", -9*Math.PI/16, Math.PI/16, 100, BABYLON.Vector3.Zero());
 	camera.attachControl(canvas, true);
     camera.inputs.attached.keyboard.angularSpeed = 0.005;
     camera.minZ = 0.01;
