@@ -179,6 +179,7 @@ class Prism extends Element {
         this.h = elevT-elevB; //height of prism (ft)
         this.x = x; //x coordinate (ft)
         this.y = y; //y coordinate (ft)
+        this.z = (elevB+elevT)/2; //average z coordinate (ft)
         
         //create prism area shape
         const shape = [
@@ -284,7 +285,8 @@ class Zone {
         this.spaces = []; //array of spaces in the zone (initialize empty, then load)
         this.cells = []; //array of cells in the zone (initialize empty, then load)
         this.blocks = []; //array of blocks in the zone (initialize empty, then load)
-        this.voids = []; //3D array of voids in the zone (initialize empty, then load)
+        this.voids = []; //3D grid of voids in the zone (initialize empty, then load)
+        this.numVoids = 0; //# of voids in the zone (initialize 0, then load)
         this.graph = []; //graph of the zone voids, storing weights between vertices (initialize empty, then createGraph)
             /*
             example:
@@ -393,7 +395,6 @@ class Zone {
 
         //create voids
         this.voids = [];
-        let voidID = 0;
         let elevBVoid = elevT;
         y = startY;
         for (let i = numRows; i < lines.length; i += (numRows+1)) {
@@ -411,10 +412,10 @@ class Zone {
                 for (let k = 0; k < row.length; k++) {
                     const val = row[k];
                     if (val == 'o') { //create void
-                        const voidObj = new Void(this.scene, dx, dy, elevBVoid, elevTVoid, x, y, voidID);
+                        const voidObj = new Void(this.scene, dx, dy, elevBVoid, elevTVoid, x, y, this.numVoids);
                         voidRow.push(voidObj);
 
-                        voidID++;
+                        this.numVoids++;
                     } else {
                         if (val == 'x') { //create block
                             this.blocks.push(new Block(this.scene, dx, dy, elevBVoid, elevTVoid, x, y));
@@ -526,47 +527,63 @@ class Zone {
         }
     }
 
-    //graph edge weight (cost) between two cells (vertices)
-    weight(cell0, cell1) {
-        return 1; //TEMPORARY
+    //graph edge weight (cost) between two voids (vertices)
+    weight(void0, void1) {
+        return euclidDist(void0.x, void0.y, void0.z, void1.x, void1.y, void1.z);
     }
 
-    //create graph from zone cell grid
+    //create graph from zone voids grid
     createGraph() {
         //initialize empty graph
-        this.graph = Array.from(Array(this.cells.length), () => []);
+        this.graph = Array.from(Array(this.numVoids), () => []);
+        
+        //loop through grid, adding neighbors & weights to the graph at the vertex (void) index (ID)
+        const numLevels = this.voids.length;
+        for (let l = 0; l < numLevels; l++) {
+            const numRows = this.voids[l].length;
+            
+            for (let i = 0; i < numRows; i++) {
+                const numCols = this.voids[l][i].length;
 
-        //loop through grid, adding neighbors & weights to the graph at the vertex (cell) index (ID)
-        const numRows = this.grid.length;
-        for (let i = 0; i < numRows; i++) {
-            const row = this.grid[i];
-            const numCols = row.length;
+                for (let j = 0; j < numCols; j++) {
+                    const voidObj = this.voids[l][i][j];
+                    
+                    if (voidObj != null) {
+                        //top neighbor
+                        if (i < numRows-1) {
+                            const top = this.voids[l][i+1][j];
+                            if (top != null) {this.graph[voidObj.ID].push([top.ID, this.weight(voidObj, top)])};
+                        }
 
-            for (let j = 0; j < numCols; j++) {
-                const cell = this.grid[i][j];
-                if (cell != null) {
-                    //top neighbor
-                    if (i < numRows-1) {
-                        const top = this.grid[i+1][j];
-                        if (top != null) {this.graph[cell.ID].push([top.ID, this.weight(cell, top)])};
-                    }
+                        //bottom neighbor
+                        if (i > 0) {
+                            const bot = this.voids[l][i-1][j];
+                            if (bot != null) {this.graph[voidObj.ID].push([bot.ID, this.weight(voidObj, bot)])};
+                        }
 
-                    //bottom neighbor
-                    if (i > 0) {
-                        const bot = this.grid[i-1][j];
-                        if (bot != null) {this.graph[cell.ID].push([bot.ID, this.weight(cell, bot)])};
-                    }
+                        //right neighbor
+                        if (j < numCols-1) {
+                            const right = this.voids[l][i][j+1];
+                            if (right != null) {this.graph[voidObj.ID].push([right.ID, this.weight(voidObj, right)])};
+                        }
 
-                    //right neighbor
-                    if (j < numCols-1) {
-                        const right = this.grid[i][j+1];
-                        if (right != null) {this.graph[cell.ID].push([right.ID, this.weight(cell, right)])};
-                    }
+                        //left neighbor
+                        if (j > 0) {
+                            const left = this.voids[l][i][j-1];
+                            if (left != null) {this.graph[voidObj.ID].push([left.ID, this.weight(voidObj, left)])};
+                        }
 
-                    //left neighbor
-                    if (j > 0) {
-                        const left = this.grid[i][j-1];
-                        if (left != null) {this.graph[cell.ID].push([left.ID, this.weight(cell, left)])};
+                        //above neighbor
+                        if (l < numLevels-1) {
+                            const above = this.voids[l+1][i][j];
+                            if (above != null) {this.graph[voidObj.ID].push([above.ID, this.weight(voidObj, above)])};
+                        }
+
+                        //below neighbor
+                        if (l > 0) {
+                            const below = this.voids[l-1][i][j];
+                            if (below != null) {this.graph[voidObj.ID].push([below.ID, this.weight(voidObj, below)])};
+                        }
                     }
                 }
             }
@@ -762,24 +779,33 @@ function prim(graph, start, terminals) {
     return mst;
 }
 
+//euclidean distance
+function euclidDist(x1, y1, z1, x2, y2, z2) {
+    return (Math.sqrt(Math.pow(x1-x2, 2) + Math.pow(y1-y2, 2) + Math.pow(z1-z2, 2)));
+}
+
 //manhattan distance
-function manhattanDist(x1, y1, x2, y2) {
-    return (Math.abs(x1-x2) + Math.abs(y1-y2));
+function manhattanDist(x1, y1, z1, x2, y2, z2) {
+    return (Math.abs(x1-x2) + Math.abs(y1-y2) + Math.abs(z1-z2));
 }
 
 //fermat (median) point of three points per manhattan distance
-function fermatPt(x1, y1, x2, y2, x3, y3) {
+function manhattanFermat(x1, y1, z1, x2, y2, z2, x3, y3, z3) {
+    //create coordinate arrays
     const xCoords = [x1, x2, x3];
     const yCoords = [y1, y2, y3];
+    const zCoords = [z1, z2, z3];
 
     //sort coordinates
     xCoords.sort((a, b) => a - b);
     yCoords.sort((a, b) => a - b);
+    zCoords.sort((a, b) => a - b);
 
     //median is middle value
     const medianX = xCoords[1];
     const medianY = yCoords[1];
-    return [medianX, medianY];
+    const medianZ = zCoords[1];
+    return [medianX, medianY, medianZ];
 }
 
 //define class for Prim-A* integrated algorithm to find the most efficient paths from start to terminal vertices
@@ -869,7 +895,7 @@ class PrimAStar {
         const terminal2 = this.zone.cells[terminalDist[1][0]];
 
         //get distance to fermat point of node & nearest terminals
-        const nearFermatPt = fermatPt(cell.x, cell.y, terminal1.x, terminal1.y, terminal2.x, terminal2.y);
+        const nearFermatPt = manhattanFermat(cell.x, cell.y, terminal1.x, terminal1.y, terminal2.x, terminal2.y);
         return manhattanDist(cell.x, cell.y, nearFermatPt[0], nearFermatPt[1]);
     }
 
@@ -1065,10 +1091,9 @@ const createScene = async function () {
 
     zone.load().then(async () => {
         zone.color();
-
-        /*
         zone.createGraph();
 
+        /*
         const [bestPaths, minCost] = await batchPrimAStar(zone, start, terminals, 
             minNear, incrNear, maxNear, 
             minAvg, incrAvg, maxAvg, 
