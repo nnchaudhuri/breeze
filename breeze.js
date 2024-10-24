@@ -1104,8 +1104,6 @@ const createScene = async function () {
         c3.log("cost: " + Math.round(minCost));
         */
     });
-
-    
     //*/
 
     //render updates
