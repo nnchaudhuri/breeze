@@ -359,6 +359,7 @@ class Zone {
         let cellID = 0;
         for (let i = rows.length-1; i >= 0; i--) {
             const row = rows[i];
+            x = startX;
 
             //create cells or blocks for each item in row
             for (let j = 0; j < row.length; j++) {
@@ -380,11 +381,8 @@ class Zone {
                 }
                 x += dx;
             }
-
-            x = startX;
             y += dy;
         }
-        y = startY;
 
         //create spaces
         let spaces = [];
@@ -397,21 +395,24 @@ class Zone {
         this.voids = [];
         let voidID = 0;
         let elevBVoid = elevT;
+        y = startY;
         for (let i = numRows; i < lines.length; i += (numRows+1)) {
             //get elevation
             const elevTVoid = parseFloat(lines[i].split('=')[1]);
 
             //create voids or blocks for each item in row
             let voidLevel = [];
+            y = startY;
             for (let j = numRows; j > 0; j--) {
                 let voidRow = [];
-                const row = lines[i+j].split(' ');
+                const row = lines[i+j].trim().split(' ');
+                x = startX;
 
                 for (let k = 0; k < row.length; k++) {
                     const val = row[k];
                     if (val == 'o') { //create void
-                        const vd = new Void(this.scene, dx, dy, elevBVoid, elevTVoid, x, y, voidID);
-                        voidRow.push(vd);
+                        const voidObj = new Void(this.scene, dx, dy, elevBVoid, elevTVoid, x, y, voidID);
+                        voidRow.push(voidObj);
 
                         voidID++;
                     } else {
@@ -422,14 +423,10 @@ class Zone {
                     }
                     x += dx;
                 }
-                x = startX;
                 y += dy;
-
                 voidLevel.push(voidRow);
             }
-            y = startY;
             elevBVoid = elevTVoid;
-
             this.voids.push(voidLevel);
         }
     }
