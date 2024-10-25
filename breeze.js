@@ -286,6 +286,7 @@ class Zone {
         this.spaces = []; //array of spaces in the zone (initialize empty, then load)
         this.spaceGrid = []; //2D grid of cell spaces in the zone (initialize empty, then load)
         this.cells = []; //array of cells in the zone (initialize empty, then load)
+        this.cellGrid = []; //2D grid of cells in the zone (initialize empty, then load)
         this.blocks = []; //array of blocks in the zone (initialize empty, then load)
         this.voids = []; //array of voids in the zone (initialize empty, then load)
         this.voidGrid = []; //3D grid of voids in the zone (initialize empty, then load)
@@ -360,6 +361,7 @@ class Zone {
 
         //create cells
         this.cells = [];
+        this.cellGrid = Array(sizeY).fill(null).map(() => Array(sizeX).fill(null));
         this.spaceGrid = Array(sizeY).fill(null).map(() => Array(sizeX).fill(null));
         let spaceCells = new Map();
         let cellID = 0;
@@ -380,6 +382,7 @@ class Zone {
                         spaceCells.get(spaceID).push(cell);
                     }
 
+                    this.cellGrid[i][j] = cell;
                     this.spaceGrid[i][j] = cell; //temporarily set to cell in space grid
                     cell.gridRow = i;
                     cell.gridCol = j;
@@ -416,11 +419,10 @@ class Zone {
             const elevTVoid = parseFloat(lines[l].split('=')[1]);
 
             //create voids or blocks for each item in row
-            let gridLevel = [];
+            let voidLevel = Array(sizeY).fill(null).map(() => Array(sizeX).fill(null));
             y = startY;
-            for (let i = numRows; i > 0; i--) {
-                let gridRow = [];
-                const row = lines[l+i].trim().split(' ');
+            for (let i = numRows-1; i >= 0; i--) {
+                const row = lines[l+i+1].trim().split(' ');
                 x = startX;
 
                 for (let j = 0; j < row.length; j++) {
@@ -428,22 +430,18 @@ class Zone {
                     if (val == 'o') { //create void
                         const voidObj = new Void(this.scene, dx, dy, elevBVoid, elevTVoid, x, y, this.numVoids);
                         this.voids.push(voidObj);
-                        gridRow.push(voidObj);
-                        voidObj.space = this.spaceGrid[i-1][j];
+                        voidLevel[i][j] = voidObj;
+                        voidObj.space = this.spaceGrid[i][j];
                         this.numVoids++;
-                    } else {
-                        if (val == 'x') { //create block
-                            this.blocks.push(new Block(this.scene, dx, dy, elevBVoid, elevTVoid, x, y));
-                        }
-                        gridRow.push(null);
+                    } else if (val == 'x') { //create block
+                        this.blocks.push(new Block(this.scene, dx, dy, elevBVoid, elevTVoid, x, y));
                     }
                     x += dx;
                 }
                 y += dy;
-                gridLevel.push(gridRow);
             }
             elevBVoid = elevTVoid;
-            this.voidGrid.push(gridLevel);
+            this.voidGrid.push(voidLevel);
         }
     }
 
@@ -673,6 +671,56 @@ class Zone {
         //reset duct & cost properties
         this.ducts = [];
         this.cost = 0;
+    }
+
+    //get the void at the elevation above a cell in the grid
+    voidPerCellElev(cellID, elev) {
+        const cell = this.cells[cellID];
+
+        //potential void objects mapped to their top elevations
+        let potenVoids = new Map();
+        for (let l = 0; l < this.voidGrid.length; l++) {
+            const voidObj = this.voidGrid[l][cell.gridRow][cell.gridCol];
+            if (voidObj != null) potenVoids.set(voidObj, voidObj.elevT);
+        }
+
+        //sort void objects by increasing elevation
+        const incrVoids = [...potenVoids.entries()].sort((a, b) => a[1] - b[1]);
+
+        //find lowest void containing specified elevation
+        for (let [voidObj, elevT] of incrVoids) {
+            if (voidObj.elevB <= elev && elevT >= elev) return voidObj;
+        }
+
+        return null; //if no void found
+    }
+
+    //show voids
+    showVoids() {
+        for (const voidObj of this.voids) {
+            voidObj.show();
+        }
+    }
+
+    //hide voids
+    hideVoids() {
+        for (const voidObj of this.voids) {
+            voidObj.hide();
+        }
+    }
+
+    //show cells
+    showCells() {
+        for (const cell of this.cells) {
+            cell.show();
+        }
+    }
+
+    //hide cells
+    hideCells() {
+        for (const cell of this.cells) {
+            cell.hide();
+        }
     }
 }
 
@@ -1088,8 +1136,8 @@ const createScene = async function () {
     //test code
     ///*
     const zone = new Zone(scene, 800);
-    const start = 0;
-    const terminals = [28, 75, 162, 131, 62, 120, 184, 32, 141, 71, 24];
+    const startCell = 0;
+    const terminalCells = [28, 75, 162, 131, 62, 120, 184, 32, 141, 71, 24];
     const elev = 18;
 
     const minNear = 0;
@@ -1106,7 +1154,12 @@ const createScene = async function () {
 
     zone.load().then(async () => {
         zone.color();
+        zone.hideVoids();
+        zone.hideCells();
         zone.createGraph();
+
+        const start = zone.voidPerCellElev(startCell, elev).ID;
+        const terminals = terminalCells.map(cellID => zone.voidPerCellElev(cellID, elev).ID);
 
         const [bestPaths, minCost] = await batchPrimAStar(zone, start, terminals, 
             minNear, incrNear, maxNear, 
