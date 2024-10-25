@@ -38,28 +38,26 @@ class Element {
 
 //define duct class
 class Duct extends Element {
-    constructor(scene, cell0, cell1, elev0, elev1) {
+    constructor(scene, void0, void1) {
         super(scene);
 
         //initialize properties
-        this.cell0 = cell0; //cell at duct start
-        this.cell1 = cell1; //cell at duct end
-        this.L = Math.sqrt(Math.pow(cell0.x-cell1.x, 2)+Math.pow(cell0.y-cell1.y, 2)); //duct length
-        this.elev0 = elev0; //elevation of duct at start
-        this.elev1 = elev1; //elevation of duct at end
+        this.void0 = void0; //void at duct start
+        this.void1 = void1; //void at duct end
+        this.L = euclidDist(void0.x, void0.y, void0.z, void1.x, void1.y, void1.z); //duct length
 
         //create duct path
         this.path = [
-            new BABYLON.Vector3(cell0.x, elev0, cell0.y),
-            new BABYLON.Vector3(cell1.x, elev1, cell1.y)
+            new BABYLON.Vector3(void0.x, void0.z, void0.y),
+            new BABYLON.Vector3(void1.x, void1.z, void1.y)
         ];
     }
 }
 
 //define round duct class
 class RndDuct extends Duct {
-    constructor(scene, cell0, cell1, elev0, elev1, rad) {
-        super(scene, cell0, cell1, elev0, elev1);
+    constructor(scene, void0, void1, rad) {
+        super(scene, void0, void1);
 
         //initialize properties
         this.type = "rnd"; //duct type
@@ -103,8 +101,8 @@ class RndDuct extends Duct {
 
 //define rectangular duct class
 class RectDuct extends Duct {
-    constructor(scene, cell0, cell1, elev0, elev1, w, h) {
-        super(scene, cell0, cell1, elev0, elev1);
+    constructor(scene, void0, void1, w, h) {
+        super(scene, void0, void1);
 
         //initialize properties
         this.type = "rect"; //duct type
@@ -203,6 +201,7 @@ class Void extends Prism {
         //initialize properties
         this.ID = ID; //void ID # (graph vertex)
         this.ductVoids = new Map(); //keys: other voids sharing ducts with this voids, values: shared ducts
+        this.space = null; //space the void is above/within
 
         //setup
         this.setupVisuals([0, 0, 0], 0.05);
@@ -229,6 +228,8 @@ class Cell extends Prism {
         this.V = this.A*this.h; //volume of cell (ft^3)
         this.space = null; //space the cell is within
         this.ID = ID; //cell ID #
+        this.gridRow = null; //row of cell position in zone grid
+        this.gridCol = null; //column of cell position in zone grid
 
         //setup
         this.setupVisuals([1, 1, 1], 0.05);
@@ -283,9 +284,11 @@ class Zone {
         //initialize properties
         this.scene = scene; //scene hosting zone
         this.spaces = []; //array of spaces in the zone (initialize empty, then load)
+        this.spaceGrid = []; //2D grid of cell spaces in the zone (initialize empty, then load)
         this.cells = []; //array of cells in the zone (initialize empty, then load)
         this.blocks = []; //array of blocks in the zone (initialize empty, then load)
-        this.voids = []; //3D grid of voids in the zone (initialize empty, then load)
+        this.voids = []; //array of voids in the zone (initialize empty, then load)
+        this.voidGrid = []; //3D grid of voids in the zone (initialize empty, then load)
         this.numVoids = 0; //# of voids in the zone (initialize 0, then load)
         this.graph = []; //graph of the zone voids, storing weights between vertices (initialize empty, then createGraph)
             /*
@@ -357,6 +360,7 @@ class Zone {
 
         //create cells
         this.cells = [];
+        this.spaceGrid = Array(sizeY).fill(null).map(() => Array(sizeX).fill(null));
         let spaceCells = new Map();
         let cellID = 0;
         for (let i = rows.length-1; i >= 0; i--) {
@@ -375,6 +379,10 @@ class Zone {
                     } else {
                         spaceCells.get(spaceID).push(cell);
                     }
+
+                    this.spaceGrid[i][j] = cell; //temporarily set to cell in space grid
+                    cell.gridRow = i;
+                    cell.gridCol = j;
                     cellID++;
                 } else {
                     if (row[j] == 'x') { //create block
@@ -389,46 +397,53 @@ class Zone {
         //create spaces
         let spaces = [];
         for (const [spaceID, cells] of spaceCells) {
-            spaces.push(new Space(this.scene, spaceID, cells, airChng.get(spaceID)));
+            const space = new Space(this.scene, spaceID, cells, airChng.get(spaceID));
+            spaces.push(space);
+
+            for (const cell of cells) {
+                this.spaceGrid[cell.gridRow][cell.gridCol] = space; //update space grid to reference cell space
+            }
         }
         this.set(spaces);
 
         //create voids
+        this.voidGrid = [];
         this.voids = [];
         let elevBVoid = elevT;
         y = startY;
-        for (let i = numRows; i < lines.length; i += (numRows+1)) {
+        for (let l = numRows; l < lines.length; l += (numRows+1)) {
             //get elevation
-            const elevTVoid = parseFloat(lines[i].split('=')[1]);
+            const elevTVoid = parseFloat(lines[l].split('=')[1]);
 
             //create voids or blocks for each item in row
-            let voidLevel = [];
+            let gridLevel = [];
             y = startY;
-            for (let j = numRows; j > 0; j--) {
-                let voidRow = [];
-                const row = lines[i+j].trim().split(' ');
+            for (let i = numRows; i > 0; i--) {
+                let gridRow = [];
+                const row = lines[l+i].trim().split(' ');
                 x = startX;
 
-                for (let k = 0; k < row.length; k++) {
-                    const val = row[k];
+                for (let j = 0; j < row.length; j++) {
+                    const val = row[j];
                     if (val == 'o') { //create void
                         const voidObj = new Void(this.scene, dx, dy, elevBVoid, elevTVoid, x, y, this.numVoids);
-                        voidRow.push(voidObj);
-
+                        this.voids.push(voidObj);
+                        gridRow.push(voidObj);
+                        voidObj.space = this.spaceGrid[i-1][j];
                         this.numVoids++;
                     } else {
                         if (val == 'x') { //create block
                             this.blocks.push(new Block(this.scene, dx, dy, elevBVoid, elevTVoid, x, y));
                         }
-                        voidRow.push(null);
+                        gridRow.push(null);
                     }
                     x += dx;
                 }
                 y += dy;
-                voidLevel.push(voidRow);
+                gridLevel.push(gridRow);
             }
             elevBVoid = elevTVoid;
-            this.voids.push(voidLevel);
+            this.voidGrid.push(gridLevel);
         }
     }
 
@@ -538,50 +553,50 @@ class Zone {
         this.graph = Array.from(Array(this.numVoids), () => []);
         
         //loop through grid, adding neighbors & weights to the graph at the vertex (void) index (ID)
-        const numLevels = this.voids.length;
+        const numLevels = this.voidGrid.length;
         for (let l = 0; l < numLevels; l++) {
-            const numRows = this.voids[l].length;
+            const numRows = this.voidGrid[l].length;
             
             for (let i = 0; i < numRows; i++) {
-                const numCols = this.voids[l][i].length;
+                const numCols = this.voidGrid[l][i].length;
 
                 for (let j = 0; j < numCols; j++) {
-                    const voidObj = this.voids[l][i][j];
+                    const voidObj = this.voidGrid[l][i][j];
                     
                     if (voidObj != null) {
                         //top neighbor
                         if (i < numRows-1) {
-                            const top = this.voids[l][i+1][j];
+                            const top = this.voidGrid[l][i+1][j];
                             if (top != null) {this.graph[voidObj.ID].push([top.ID, this.weight(voidObj, top)])};
                         }
 
                         //bottom neighbor
                         if (i > 0) {
-                            const bot = this.voids[l][i-1][j];
+                            const bot = this.voidGrid[l][i-1][j];
                             if (bot != null) {this.graph[voidObj.ID].push([bot.ID, this.weight(voidObj, bot)])};
                         }
 
                         //right neighbor
                         if (j < numCols-1) {
-                            const right = this.voids[l][i][j+1];
+                            const right = this.voidGrid[l][i][j+1];
                             if (right != null) {this.graph[voidObj.ID].push([right.ID, this.weight(voidObj, right)])};
                         }
 
                         //left neighbor
                         if (j > 0) {
-                            const left = this.voids[l][i][j-1];
+                            const left = this.voidGrid[l][i][j-1];
                             if (left != null) {this.graph[voidObj.ID].push([left.ID, this.weight(voidObj, left)])};
                         }
 
                         //above neighbor
                         if (l < numLevels-1) {
-                            const above = this.voids[l+1][i][j];
+                            const above = this.voidGrid[l+1][i][j];
                             if (above != null) {this.graph[voidObj.ID].push([above.ID, this.weight(voidObj, above)])};
                         }
 
                         //below neighbor
                         if (l > 0) {
-                            const below = this.voids[l-1][i][j];
+                            const below = this.voidGrid[l-1][i][j];
                             if (below != null) {this.graph[voidObj.ID].push([below.ID, this.weight(voidObj, below)])};
                         }
                     }
@@ -591,11 +606,11 @@ class Zone {
     }
 
     //create ducts from paths
-    createDucts(paths, elev) {
+    createDucts(paths) {
         //determine # of terminals per space
         const spaceTerminals = new Map();
         for (let path of paths) {
-            const terminal = this.cells[path[path.length-1]];
+            const terminal = this.voids[path[path.length-1]];
             const spaceID = terminal.space.ID;
             if (spaceTerminals.has(spaceID)) {
                 const numTerminals = spaceTerminals.get(spaceID);
@@ -610,20 +625,20 @@ class Zone {
         this.cost = 0;
         for (let path of paths) {
             //get terminal space
-            const terminal = this.cells[path[path.length-1]];
+            const terminal = this.voids[path[path.length-1]];
             const spaceID = terminal.space.ID;
 
             //calculate duct radius
             const rad = Math.sqrt(terminal.space.airFlow/spaceTerminals.get(spaceID)/this.tgtVel/Math.PI);
 
             for (let i = path.length-1; i > 0; i--) { //go from terminal to start
-                //get cells on path
-                const cell0 = this.cells[path[i]];
-                const cell1 = this.cells[path[i-1]];
+                //get voids on path
+                const void0 = this.voids[path[i]];
+                const void1 = this.voids[path[i-1]];
 
-                if (cell0.ductCells.has(cell1) || cell1.ductCells.has(cell0)) { //duct already between cells
+                if (void0.ductVoids.has(void1) || void1.ductVoids.has(void0)) { //duct already between voids
                     //get existing duct
-                    const exDuct = cell0.ductCells.get(cell1) || cell1.ductCells.get(cell0);
+                    const exDuct = void0.ductVoids.get(void1) || void1.ductVoids.get(void0);
                     this.cost -= exDuct.cost();
 
                     //increase existing duct size
@@ -632,12 +647,12 @@ class Zone {
                     this.cost += exDuct.cost();
 
                 } else { //create new duct
-                    const duct = new RndDuct(this.scene, cell0, cell1, elev, elev, rad);
+                    const duct = new RndDuct(this.scene, void0, void1, rad);
                     this.ducts.push(duct);
                     this.cost += duct.cost();
 
-                    cell0.ductCells.set(cell1, duct);
-                    cell1.ductCells.set(cell0, duct);
+                    void0.ductVoids.set(void1, duct);
+                    void1.ductVoids.set(void0, duct);
                 }   
             }
         }
@@ -645,9 +660,9 @@ class Zone {
 
     //clear zone ducts
     clearDucts() {
-        //reset cell duct maps
-        for (let cell of this.cells) {
-            cell.ductCells = new Map();
+        //reset void duct maps
+        for (let voidObj of this.voids) {
+            voidObj.ductVoids = new Map();
         }
 
         //delete duct meshes
@@ -833,14 +848,14 @@ class PrimAStar {
 
     //distance to average terminal (remaining)
     distAvgTerminal(node) {
-        const cell = this.zone.cells[node];
+        const voidObj = this.zone.voids[node];
 
         let sumDist = 0;
         let numTerminals = 0;
         for (let terminal of this.terminals) {
             if (!this.processedTerminals.has(terminal)) {
-                const terminalCell = this.zone.cells[terminal];
-                sumDist += manhattanDist(cell.x, cell.y, terminalCell.x, terminalCell.y);
+                const terminalVoid = this.zone.voids[terminal];
+                sumDist += manhattanDist(voidObj.x, voidObj.y, voidObj.z, terminalVoid.x, terminalVoid.y, terminalVoid.z);
                 numTerminals++;
             }
         }
@@ -854,13 +869,13 @@ class PrimAStar {
 
     //distance to nearest terminal (remaining)
     distNearTerminal(node) {
-        const cell = this.zone.cells[node];
+        const voidObj = this.zone.voids[node];
 
         let minDist = Infinity;
         for (let terminal of this.terminals) {
             if (!this.processedTerminals.has(terminal)) {
-                const terminalCell = this.zone.cells[terminal];
-                const dist = manhattanDist(cell.x, cell.y, terminalCell.x, terminalCell.y);
+                const terminalVoid = this.zone.voids[terminal];
+                const dist = manhattanDist(voidObj.x, voidObj.y, voidObj.z, terminalVoid.x, terminalVoid.y, terminalVoid.z);
                 if (dist < minDist) minDist = dist;
             }
         }
@@ -874,14 +889,14 @@ class PrimAStar {
 
     //distance to nearest fermat point (minimizing distance to 2 nearest terminals)
     distNearFermat(node) {
-        const cell = this.zone.cells[node];
+        const voidObj = this.zone.voids[node];
 
         //get distances to remaining terminals
         let terminalDist = [];
         for (let terminal of this.terminals) {
             if (!this.processedTerminals.has(terminal)) {
-                const terminalCell = this.zone.cells[terminal];
-                const dist = manhattanDist(cell.x, cell.y, terminalCell.x, terminalCell.y);
+                const terminalVoid = this.zone.voids[terminal];
+                const dist = manhattanDist(voidObj.x, voidObj.y, voidObj.z, terminalVoid.x, terminalVoid.y, terminalVoid.z);
                 terminalDist.push([terminal, dist]);
             }
         }
@@ -891,12 +906,12 @@ class PrimAStar {
 
         //sort to find 2 nearest terminals
         terminalDist.sort((a, b) => a[1] - b[1]);
-        const terminal1 = this.zone.cells[terminalDist[0][0]];
-        const terminal2 = this.zone.cells[terminalDist[1][0]];
+        const terminal1 = this.zone.voids[terminalDist[0][0]];
+        const terminal2 = this.zone.voids[terminalDist[1][0]];
 
         //get distance to fermat point of node & nearest terminals
-        const nearFermatPt = manhattanFermat(cell.x, cell.y, terminal1.x, terminal1.y, terminal2.x, terminal2.y);
-        return manhattanDist(cell.x, cell.y, nearFermatPt[0], nearFermatPt[1]);
+        const nearFermatPt = manhattanFermat(voidObj.x, voidObj.y, voidObj.z, terminal1.x, terminal1.y, terminal1.z, terminal2.x, terminal2.y, terminal2.z);
+        return manhattanDist(voidObj.x, voidObj.y, voidObj.z, nearFermatPt[0], nearFermatPt[1], nearFermatPt[2]);
     }
 
     //heuristic to improve path efficiency
@@ -986,7 +1001,7 @@ function delay(ms) {
 }
 
 //find best solution by batch-running Prim-A* with different near & average terminal weightings
-async function batchPrimAStar(zone, start, terminals, minNear, incrNear, maxNear, minAvg, incrAvg, maxAvg, minFerm, incrFerm, maxFerm, elev, animate) {
+async function batchPrimAStar(zone, start, terminals, minNear, incrNear, maxNear, minAvg, incrAvg, maxAvg, minFerm, incrFerm, maxFerm, animate) {
     let allPaths = new Set();
     let bestPaths = [];
     let minCost = Infinity;
@@ -999,7 +1014,7 @@ async function batchPrimAStar(zone, start, terminals, minNear, incrNear, maxNear
 
                 if (!allPaths.has(paths)) {
                     allPaths.add(paths);
-                    zone.createDucts(paths, elev);
+                    zone.createDucts(paths);
 
                     if (zone.cost < minCost) {
                         minCost = zone.cost;
@@ -1093,16 +1108,14 @@ const createScene = async function () {
         zone.color();
         zone.createGraph();
 
-        /*
         const [bestPaths, minCost] = await batchPrimAStar(zone, start, terminals, 
             minNear, incrNear, maxNear, 
             minAvg, incrAvg, maxAvg, 
             minFerm, incrFerm, maxFerm, 
-            elev, true);
+            true);
 
-        zone.createDucts(bestPaths, elev);
+        zone.createDucts(bestPaths);
         c3.log("cost: " + Math.round(minCost));
-        */
     });
     //*/
 
